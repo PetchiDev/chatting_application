@@ -7,6 +7,7 @@ import { MessageBubble } from './MessageBubble';
 import { VoiceRecorder } from './VoiceRecorder';
 import { NotificationPanel } from './NotificationPanel';
 import { ForwardMessageModal } from './ForwardMessageModal';
+import { GroupMembersModal } from './GroupMembersModal';
 import type { MessageDto, NotificationDto, SendMessageOptions } from '../types';
 import * as api from '../lib/api';
 
@@ -93,6 +94,7 @@ export function ChatWindow({
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [forwardMsg, setForwardMsg] = useState<MessageDto | null>(null);
+  const [showGroupMembers, setShowGroupMembers] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -256,16 +258,32 @@ export function ChatWindow({
             </div>
 
             <div className="chat-header-info">
-              <h1>{title}</h1>
+              {isCustomGroup && selectedGroup ? (
+                <button
+                  type="button"
+                  className="group-title-btn"
+                  onClick={() => setShowGroupMembers(true)}
+                  title="View group members"
+                >
+                  <h1>{title}</h1>
+                </button>
+              ) : (
+                <h1>{title}</h1>
+              )}
               {isGlobal ? (
                 <span className="status-badge group-badge">
                   <span className="badge-icon">⏱</span>
                   Resets every 24h
                 </span>
               ) : isCustomGroup ? (
-                <span className="status-badge group-badge">
+                <button
+                  type="button"
+                  className="status-badge group-badge group-members-trigger"
+                  onClick={() => setShowGroupMembers(true)}
+                  title="View group members"
+                >
                   {selectedGroup?.memberCount} members
-                </span>
+                </button>
               ) : (
                 <span className={`status-badge ${isOnline ? 'online' : 'offline'}`}>
                   <span className={`status-dot ${isOnline ? 'online' : ''}`} />
@@ -380,6 +398,10 @@ export function ChatWindow({
           onClose={() => setForwardMsg(null)}
           onForward={handleForward}
         />
+      )}
+
+      {showGroupMembers && selectedGroup && (
+        <GroupMembersModal group={selectedGroup} onClose={() => setShowGroupMembers(false)} />
       )}
     </main>
   );

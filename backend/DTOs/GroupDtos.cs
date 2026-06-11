@@ -6,6 +6,15 @@ public record AddMembersRequest(List<Guid> MemberIds);
 
 public record GroupDto(Guid Id, string Name, Guid CreatedBy, DateTime CreatedAt, int MemberCount, bool IsMuted);
 
+public record GroupMemberDto(
+    Guid UserId,
+    string Username,
+    string? ProfilePictureUrl,
+    bool IsGuest,
+    string Role,
+    bool IsOnline
+);
+
 public record MuteRequest(string ChannelType, Guid? ChannelId, bool Muted);
 
 public record MuteEntryDto(string ChannelType, Guid? ChannelId);

@@ -190,6 +190,55 @@ public partial class DatabaseService
         return ids;
     }
 
+    public async Task<List<(Guid UserId, string Username, string? ProfilePictureUrl, bool IsGuest, string Role)>> GetGroupMembersAsync(Guid groupId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            @"SELECT gm.user_id, u.username, u.profile_picture_url, u.is_guest, gm.role
+              FROM group_members gm
+              JOIN users u ON u.id = gm.user_id
+              WHERE gm.group_id = @gid AND gm.left_at IS NULL
+              ORDER BY CASE WHEN gm.role = 'owner' THEN 0 ELSE 1 END, u.username", conn);
+        cmd.Parameters.AddWithValue("gid", groupId);
+        var list = new List<(Guid, string, string?, bool, string)>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add((
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetBoolean(3),
+                reader.GetString(4)
+            ));
+        }
+        return list;
+    }
+
+    public async Task<bool> IsGroupOwnerAsync(Guid groupId, Guid userId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            @"SELECT 1 FROM group_members WHERE group_id = @gid AND user_id = @uid AND role = 'owner' AND left_at IS NULL", conn);
+        cmd.Parameters.AddWithValue("gid", groupId);
+        cmd.Parameters.AddWithValue("uid", userId);
+        return await cmd.ExecuteScalarAsync() != null;
+    }
+
+    public async Task<bool> RemoveGroupMemberAsync(Guid groupId, Guid userId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            @"UPDATE group_members SET left_at = NOW()
+              WHERE group_id = @gid AND user_id = @uid AND role <> 'owner' AND left_at IS NULL", conn);
+        cmd.Parameters.AddWithValue("gid", groupId);
+        cmd.Parameters.AddWithValue("uid", userId);
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
     public async Task LeaveGroupAsync(Guid groupId, Guid userId)
     {
         await using var conn = CreateConnection();

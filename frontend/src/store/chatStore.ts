@@ -38,6 +38,7 @@ interface ChatState {
   addCustomGroup: (group: GroupDto) => void;
   removeCustomGroup: (groupId: string) => void;
   updateGroupMute: (groupId: string, isMuted: boolean) => void;
+  updateCustomGroup: (group: GroupDto) => void;
   setGlobalMuted: (muted: boolean) => void;
   setDmMuted: (userId: string, muted: boolean) => void;
   applyMutes: (entries: MuteEntryDto[]) => void;
@@ -165,6 +166,12 @@ export const useChatStore = create<ChatState>((set) => ({
       customGroups: s.customGroups.map((g) => (g.id === groupId ? { ...g, isMuted } : g)),
       selectedGroup:
         s.selectedGroup?.id === groupId ? { ...s.selectedGroup, isMuted } : s.selectedGroup,
+    })),
+
+  updateCustomGroup: (group) =>
+    set((s) => ({
+      customGroups: s.customGroups.map((g) => (g.id === group.id ? group : g)),
+      selectedGroup: s.selectedGroup?.id === group.id ? group : s.selectedGroup,
     })),
 
   setGlobalMuted: (globalMuted) => set({ globalMuted }),

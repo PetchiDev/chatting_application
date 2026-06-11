@@ -74,6 +74,58 @@ public class GroupController : ControllerBase
         return Ok();
     }
 
+    [HttpGet("{groupId:guid}/members")]
+    public async Task<ActionResult<List<GroupMemberDto>>> GetMembers(Guid groupId)
+    {
+        var userId = _auth.GetUserIdFromClaims(User);
+        if (userId == null) return Unauthorized();
+        if (!await _db.IsGroupMemberAsync(groupId, userId.Value)) return Forbid();
+
+        var members = await _db.GetGroupMembersAsync(groupId);
+        return Ok(members.Select(m => new GroupMemberDto(
+            m.UserId,
+            m.Username,
+            m.ProfilePictureUrl,
+            m.IsGuest,
+            m.Role,
+            _presence.IsUserOnline(m.UserId)
+        )).ToList());
+    }
+
+    [HttpDelete("{groupId:guid}/members/{memberId:guid}")]
+    public async Task<IActionResult> RemoveMember(Guid groupId, Guid memberId)
+    {
+        var userId = _auth.GetUserIdFromClaims(User);
+        if (userId == null) return Unauthorized();
+        if (!await _db.IsGroupOwnerAsync(groupId, userId.Value)) return Forbid();
+        if (memberId == userId.Value) return BadRequest(new { error = "Use leave to remove yourself" });
+        if (!await _db.IsGroupMemberAsync(groupId, memberId)) return NotFound();
+
+        if (!await _db.RemoveGroupMemberAsync(groupId, memberId))
+            return BadRequest(new { error = "Cannot remove this member" });
+
+        var conn = _presence.GetConnectionId(memberId);
+        if (conn != null)
+        {
+            await _hub.Groups.RemoveFromGroupAsync(conn, ChatHub.GroupChannel(groupId));
+            await _hub.Clients.Client(conn).SendAsync("GroupRemoved", groupId);
+        }
+
+        var group = await _db.GetGroupForMemberAsync(groupId, userId.Value);
+        if (group != null)
+        {
+            var memberIds = await _db.GetGroupMemberIdsAsync(groupId);
+            foreach (var id in memberIds)
+            {
+                var memberConn = _presence.GetConnectionId(id);
+                if (memberConn == null) continue;
+                await _hub.Clients.Client(memberConn).SendAsync("GroupUpdated", ToDto(group));
+            }
+        }
+
+        return Ok();
+    }
+
     [HttpPost("{groupId:guid}/leave")]
     public async Task<IActionResult> LeaveGroup(Guid groupId)
     {

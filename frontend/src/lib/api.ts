@@ -1,4 +1,4 @@
-import type { AuthUser, GroupDto, MessageDto, MuteEntryDto, NotificationDto, RecentChatDto, UserDto } from '../types';
+import type { AuthUser, GroupDto, GroupMemberDto, MessageDto, MuteEntryDto, NotificationDto, RecentChatDto, UserDto } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -110,6 +110,21 @@ export async function addGroupMembers(token: string, groupId: string, memberIds:
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify({ memberIds }),
+  });
+  await handleResponse(res);
+}
+
+export async function getGroupMembers(token: string, groupId: string) {
+  const res = await fetch(`${API_URL}/api/group/${groupId}/members`, {
+    headers: authHeaders(token),
+  });
+  return handleResponse<GroupMemberDto[]>(res);
+}
+
+export async function removeGroupMember(token: string, groupId: string, memberId: string) {
+  const res = await fetch(`${API_URL}/api/group/${groupId}/members/${memberId}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
   });
   await handleResponse(res);
 }

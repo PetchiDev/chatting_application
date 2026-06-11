@@ -40,6 +40,15 @@ export interface GroupDto {
   isMuted: boolean;
 }
 
+export interface GroupMemberDto {
+  userId: string;
+  username: string;
+  profilePictureUrl?: string;
+  isGuest: boolean;
+  role: 'owner' | 'member';
+  isOnline: boolean;
+}
+
 export interface NotificationDto {
   id: string;
   title: string;

@@ -148,6 +148,10 @@ export function useSignalR() {
       removeCustomGroup(groupId);
     });
 
+    connection.on('GroupUpdated', (group: GroupDto) => {
+      useChatStore.getState().updateCustomGroup(group);
+    });
+
     connection.on(
       'MessageDeleted',
       (payload: { messageId: string; recipientId?: string; groupId?: string }) => {
