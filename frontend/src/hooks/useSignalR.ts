@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
-import type { MessageDto, UserDto } from '../types';
+import type { MessageDto, NotificationDto, SendMessageOptions, UserDto } from '../types';
 import * as api from '../lib/api';
+import { normalizeUserId } from '../lib/users';
 
 const HUB_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/hubs/chat`
@@ -20,6 +21,7 @@ export function useSignalR() {
 
     const {
       addGroupMessage,
+      addCustomGroupMessage,
       addDirectMessage,
       setUsers,
       setRecentChats,
@@ -28,10 +30,25 @@ export function useSignalR() {
       clearAll,
       updateUser,
       removeMessage,
+      setGroupMessages,
+      setCustomGroups,
+      setNotifications,
+      addNotification,
     } = useChatStore.getState();
 
+    const selfId = normalizeUserId(user.userId);
+
     const applyOnlineUsers = (users: UserDto[]) => {
-      setUsers(users.filter((u) => u.id !== user.userId));
+      setUsers(users.filter((u) => normalizeUserId(u.id) !== selfId));
+    };
+
+    const refreshUsers = async () => {
+      try {
+        const list = await api.getUsers(user.token);
+        applyOnlineUsers(list);
+      } catch {
+        /* REST fallback failed; SignalR may still update */
+      }
     };
 
     const syncOnlineUsers = async (conn: signalR.HubConnection) => {
@@ -45,7 +62,11 @@ export function useSignalR() {
       .build();
 
     connection.on('ReceiveMessage', (msg: MessageDto) => {
-      if (!msg.recipientId) addGroupMessage(msg);
+      if (!msg.recipientId && !msg.groupId) addGroupMessage(msg);
+    });
+
+    connection.on('ReceiveGroupMessage', (msg: MessageDto) => {
+      if (msg.groupId) addCustomGroupMessage(msg.groupId, msg);
     });
 
     connection.on('ReceiveDirectMessage', (msg: MessageDto) => {
@@ -67,13 +88,29 @@ export function useSignalR() {
 
     connection.on('ChatReset', () => clearAll());
 
-    connection.on('MessageDeleted', (payload: { messageId: string }) => {
-      removeMessage(payload.messageId);
+    connection.on('NewNotification', (n: NotificationDto) => {
+      addNotification(n);
     });
+
+    connection.on(
+      'MessageDeleted',
+      (payload: { messageId: string; recipientId?: string; groupId?: string }) => {
+        removeMessage(payload.messageId, payload.groupId);
+      }
+    );
 
     connection.onreconnected(async () => {
       await syncOnlineUsers(connection);
+      await refreshUsers();
     });
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshUsers();
+        void syncOnlineUsers(connection);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     (async () => {
       try {
@@ -82,17 +119,19 @@ export function useSignalR() {
 
         connectionRef.current = connection;
 
-        // Presence sync first — hub is the source of truth for online status
-        await syncOnlineUsers(connection);
-        if (cancelled) return;
-
-        const [groupMsgs, recentChats] = await Promise.all([
+        const [groupMsgs, recentChats, groups, notifData] = await Promise.all([
           api.getGroupMessages(user.token),
           api.getRecentChats(user.token),
+          api.getMyGroups(user.token).catch(() => []),
+          api.getNotifications(user.token).catch(() => ({ unread: 0, items: [] })),
         ]);
         if (cancelled) return;
 
-        useChatStore.getState().setGroupMessages(groupMsgs);
+        setGroupMessages(groupMsgs);
+        setCustomGroups(groups);
+        setNotifications(notifData.items, notifData.unread);
+        await Promise.all([syncOnlineUsers(connection), refreshUsers()]);
+        if (cancelled) return;
         setRecentChats(recentChats);
       } catch (err) {
         console.error(err);
@@ -101,6 +140,7 @@ export function useSignalR() {
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
       connection.stop();
       connectionRef.current = null;
     };
@@ -109,25 +149,39 @@ export function useSignalR() {
   const sendMessage = async (
     content: string | undefined,
     messageType: string,
-    recipientId?: string,
-    attachmentUrl?: string,
-    attachmentName?: string
+    options: SendMessageOptions = {}
   ) => {
     const conn = connectionRef.current;
     if (!conn || conn.state !== signalR.HubConnectionState.Connected) return;
     await conn.invoke('SendMessage', {
       content,
       messageType,
-      recipientId: recipientId || null,
-      attachmentUrl,
-      attachmentName,
+      recipientId: options.recipientId || null,
+      groupId: options.groupId || null,
+      attachmentUrl: options.attachmentUrl,
+      attachmentName: options.attachmentName,
+      forwardedFromId: null,
     });
   };
 
-  const sendTyping = async (recipientId: string | null, isTyping: boolean) => {
+  const forwardMessage = async (
+    messageId: string,
+    recipientId?: string,
+    groupId?: string
+  ) => {
     const conn = connectionRef.current;
     if (!conn || conn.state !== signalR.HubConnectionState.Connected) return;
-    await conn.invoke('SendTyping', recipientId, isTyping);
+    await conn.invoke('ForwardMessage', { messageId, recipientId: recipientId || null, groupId: groupId || null });
+  };
+
+  const sendTyping = async (
+    recipientId: string | null,
+    isTyping: boolean,
+    groupId?: string | null
+  ) => {
+    const conn = connectionRef.current;
+    if (!conn || conn.state !== signalR.HubConnectionState.Connected) return;
+    await conn.invoke('SendTyping', recipientId, groupId || null, isTyping);
   };
 
   const deleteMessage = async (messageId: string, forEveryone: boolean) => {
@@ -136,5 +190,5 @@ export function useSignalR() {
     await conn.invoke('DeleteMessage', messageId, forEveryone);
   };
 
-  return { sendMessage, sendTyping, deleteMessage };
+  return { sendMessage, sendTyping, deleteMessage, forwardMessage };
 }

@@ -4,6 +4,9 @@ import { useChatStore } from '../store/chatStore';
 import { useAuthStore } from '../store/authStore';
 import { MessageBubble } from './MessageBubble';
 import { VoiceRecorder } from './VoiceRecorder';
+import { NotificationPanel } from './NotificationPanel';
+import { ForwardMessageModal } from './ForwardMessageModal';
+import type { MessageDto, NotificationDto, SendMessageOptions } from '../types';
 import * as api from '../lib/api';
 
 function LogoutIcon() {
@@ -20,37 +23,65 @@ interface Props {
   sendMessage: (
     content: string | undefined,
     messageType: string,
-    recipientId?: string,
-    attachmentUrl?: string,
-    attachmentName?: string
+    options?: SendMessageOptions
   ) => Promise<void>;
-  sendTyping: (recipientId: string | null, isTyping: boolean) => Promise<void>;
+  sendTyping: (recipientId: string | null, isTyping: boolean, groupId?: string | null) => Promise<void>;
   deleteMessage: (messageId: string, forEveryone: boolean) => Promise<void>;
+  forwardMessage: (messageId: string, recipientId?: string, groupId?: string) => Promise<void>;
+  onStartCall: (type: 'audio' | 'video') => void;
   onOpenSidebar: () => void;
   onLogout: () => void;
+  onNotificationNavigate: (n: NotificationDto) => void;
 }
 
-export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSidebar, onLogout }: Props) {
+export function ChatWindow({
+  sendMessage,
+  sendTyping,
+  deleteMessage,
+  forwardMessage,
+  onStartCall,
+  onOpenSidebar,
+  onLogout,
+  onNotificationNavigate,
+}: Props) {
   const user = useAuthStore((s) => s.user);
   const selectedUser = useChatStore((s) => s.selectedUser);
+  const selectedGroup = useChatStore((s) => s.selectedGroup);
   const groupMessages = useChatStore((s) => s.groupMessages);
+  const customGroupMessages = useChatStore((s) => s.customGroupMessages);
   const directMessages = useChatStore((s) => s.directMessages);
   const typingUsers = useChatStore((s) => s.typingUsers);
+  const globalMuted = useChatStore((s) => s.globalMuted);
   const setDirectMessages = useChatStore((s) => s.setDirectMessages);
+  const setCustomGroupMessages = useChatStore((s) => s.setCustomGroupMessages);
+  const setGlobalMuted = useChatStore((s) => s.setGlobalMuted);
+  const updateGroupMute = useChatStore((s) => s.updateGroupMute);
 
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState<MessageDto | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout>>();
 
+  const isGlobal = !selectedUser && !selectedGroup;
+  const isCustomGroup = Boolean(selectedGroup);
+  const isDm = Boolean(selectedUser);
+
   const messages = selectedUser
     ? directMessages[selectedUser.id] || []
-    : groupMessages;
+    : selectedGroup
+      ? customGroupMessages[selectedGroup.id] || []
+      : groupMessages;
 
-  const title = selectedUser ? selectedUser.username : 'Group Chat';
+  const title = selectedUser?.username ?? selectedGroup?.name ?? 'Group Chat';
   const isOnline = selectedUser?.isOnline;
-  const isGroup = !selectedUser;
+  const isMuted = selectedGroup?.isMuted ?? (isGlobal ? globalMuted : false);
+
+  const messageOptions: SendMessageOptions = {
+    recipientId: selectedUser?.id,
+    groupId: selectedGroup?.id,
+  };
 
   useEffect(() => {
     if (!user?.token || !selectedUser) return;
@@ -60,31 +91,38 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
   }, [selectedUser?.id, user?.token, setDirectMessages]);
 
   useEffect(() => {
+    if (!user?.token || !selectedGroup) return;
+    api.getCustomGroupMessages(user.token, selectedGroup.id).then((msgs) => {
+      setCustomGroupMessages(selectedGroup.id, msgs);
+    });
+  }, [selectedGroup?.id, user?.token, setCustomGroupMessages]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
   useEffect(() => {
     if (!headerRef.current) return;
     gsap.fromTo(headerRef.current, { y: -12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 });
-  }, [selectedUser?.id]);
+  }, [selectedUser?.id, selectedGroup?.id]);
 
   const handleTyping = useCallback(
     (value: string) => {
       setText(value);
-      sendTyping(selectedUser?.id ?? null, true);
+      sendTyping(selectedUser?.id ?? null, true, selectedGroup?.id ?? null);
       clearTimeout(typingTimeout.current);
       typingTimeout.current = setTimeout(() => {
-        sendTyping(selectedUser?.id ?? null, false);
+        sendTyping(selectedUser?.id ?? null, false, selectedGroup?.id ?? null);
       }, 1500);
     },
-    [selectedUser?.id, sendTyping]
+    [selectedUser?.id, selectedGroup?.id, sendTyping]
   );
 
   const handleSend = async () => {
     if (!text.trim()) return;
-    await sendMessage(text.trim(), 'text', selectedUser?.id);
+    await sendMessage(text.trim(), 'text', messageOptions);
     setText('');
-    sendTyping(selectedUser?.id ?? null, false);
+    sendTyping(selectedUser?.id ?? null, false, selectedGroup?.id ?? null);
   };
 
   const handleFileUpload = async (file: File) => {
@@ -95,7 +133,7 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
       let type = 'file';
       if (contentType.startsWith('image/')) type = 'image';
       else if (contentType.startsWith('audio/')) type = 'audio';
-      await sendMessage(undefined, type, selectedUser?.id, url, name);
+      await sendMessage(undefined, type, { ...messageOptions, attachmentUrl: url, attachmentName: name });
     } finally {
       setUploading(false);
     }
@@ -109,7 +147,7 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
       const ext = mime.includes('mp4') ? 'm4a' : 'webm';
       const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
       const { url, name } = await api.uploadFile(user.token, file);
-      await sendMessage(undefined, 'audio', selectedUser?.id, url, name);
+      await sendMessage(undefined, 'audio', { ...messageOptions, attachmentUrl: url, attachmentName: name });
     } catch (err) {
       console.error(err);
       alert('Failed to send voice message');
@@ -117,6 +155,41 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
       setUploading(false);
     }
   };
+
+  const handleToggleMute = async () => {
+    if (!user?.token) return;
+    const next = !isMuted;
+    try {
+      if (isGlobal) {
+        await api.setMute(user.token, 'global', null, next);
+        setGlobalMuted(next);
+      } else if (selectedGroup) {
+        await api.setMute(user.token, 'group', selectedGroup.id, next);
+        updateGroupMute(selectedGroup.id, next);
+      } else if (selectedUser) {
+        await api.setMute(user.token, 'dm', selectedUser.id, next);
+      }
+    } catch {
+      alert('Could not update mute setting. Please try again.');
+    }
+  };
+
+  const handleDownload = async (msg: MessageDto) => {
+    if (!user?.token) return;
+    try {
+      await api.downloadAttachment(user.token, msg.id, msg.attachmentName || 'attachment');
+    } catch {
+      alert('Download failed');
+    }
+  };
+
+  const handleForward = async (recipientId?: string, groupId?: string) => {
+    if (!forwardMsg) return;
+    await forwardMessage(forwardMsg.id, recipientId, groupId);
+    setForwardMsg(null);
+  };
+
+  const canCall = isDm || isCustomGroup;
 
   return (
     <main className="chat-window">
@@ -128,8 +201,8 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
               <span /><span /><span />
             </button>
 
-            <div className={`header-avatar ${isGroup ? 'group' : ''} ${isOnline ? 'online' : ''}`}>
-              {isGroup ? (
+            <div className={`header-avatar ${isGlobal || isCustomGroup ? 'group' : ''} ${isOnline ? 'online' : ''}`}>
+              {isGlobal || isCustomGroup ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="2" />
@@ -144,10 +217,14 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
 
             <div className="chat-header-info">
               <h1>{title}</h1>
-              {isGroup ? (
+              {isGlobal ? (
                 <span className="status-badge group-badge">
                   <span className="badge-icon">⏱</span>
                   Resets every 24h
+                </span>
+              ) : isCustomGroup ? (
+                <span className="status-badge group-badge">
+                  {selectedGroup?.memberCount} members
                 </span>
               ) : (
                 <span className={`status-badge ${isOnline ? 'online' : 'offline'}`}>
@@ -159,7 +236,27 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
           </div>
 
           <div className="chat-header-actions">
-            <button type="button" className="btn-logout" onClick={onLogout}>
+            {canCall && (
+              <>
+                <button type="button" className="header-icon-btn" onClick={() => onStartCall('audio')} title="Audio call" aria-label="Audio call">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" stroke="currentColor" strokeWidth="2"/></svg>
+                </button>
+                <button type="button" className="header-icon-btn" onClick={() => onStartCall('video')} title="Video call" aria-label="Video call">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><polygon points="23 7 16 12 23 17 23 7" stroke="currentColor" strokeWidth="2"/><rect x="1" y="5" width="15" height="14" rx="2" stroke="currentColor" strokeWidth="2"/></svg>
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className={`header-icon-btn ${isMuted ? 'active' : ''}`}
+              onClick={handleToggleMute}
+              title={isMuted ? 'Unmute notifications' : 'Mute notifications'}
+              aria-label="Toggle mute"
+            >
+              {isMuted ? '🔕' : '🔔'}
+            </button>
+            <NotificationPanel onNavigate={onNotificationNavigate} />
+            <button type="button" className="btn-logout header-signout" onClick={onLogout}>
               <LogoutIcon />
               <span className="logout-label">Sign out</span>
             </button>
@@ -181,6 +278,8 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
             message={msg}
             isOwn={msg.senderId === user?.userId}
             onDelete={deleteMessage}
+            onForward={(m) => setForwardMsg(m)}
+            onDownload={handleDownload}
           />
         ))}
         {typingUsers.length > 0 && (
@@ -233,6 +332,14 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
           </svg>
         </button>
       </footer>
+
+      {forwardMsg && (
+        <ForwardMessageModal
+          message={forwardMsg}
+          onClose={() => setForwardMsg(null)}
+          onForward={handleForward}
+        />
+      )}
     </main>
   );
 }

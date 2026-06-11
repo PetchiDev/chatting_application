@@ -26,12 +26,34 @@ export interface RecentChatDto {
   lastMessagePreview?: string;
 }
 
+export interface GroupDto {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdAt: string;
+  memberCount: number;
+  isMuted: boolean;
+}
+
+export interface NotificationDto {
+  id: string;
+  title: string;
+  body: string;
+  channelType: 'global' | 'dm' | 'group';
+  channelId?: string;
+  messageId?: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export interface MessageDto {
   id: string;
   senderId: string;
   senderUsername: string;
   senderProfilePicture?: string;
   recipientId?: string;
+  groupId?: string;
+  forwardedFromId?: string;
   content?: string;
   messageType: 'text' | 'image' | 'file' | 'audio';
   attachmentUrl?: string;
@@ -43,4 +65,20 @@ export interface MessageDto {
   createdAt: string;
 }
 
-export type ChatMode = 'group' | 'direct';
+export interface CallSignal {
+  callId: string;
+  fromUserId: string;
+  fromUsername: string;
+  toUserId?: string;
+  groupId?: string;
+  callType: 'audio' | 'video';
+  signalType: 'offer' | 'answer' | 'ice' | 'hangup' | 'ring';
+  payload?: RTCSessionDescriptionInit | RTCIceCandidateInit | null;
+}
+
+export interface SendMessageOptions {
+  recipientId?: string;
+  groupId?: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
+}

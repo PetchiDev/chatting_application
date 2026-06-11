@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { MessageDto, RecentChatDto, UserDto } from '../types';
+import { findUserById, mergeRecentWithUsers, sameUserId } from '../lib/users';
+import type { GroupDto, MessageDto, NotificationDto, RecentChatDto, UserDto } from '../types';
 
 function messagePreview(msg: MessageDto): string {
   switch (msg.messageType) {
@@ -17,68 +18,94 @@ function messagePreview(msg: MessageDto): string {
 interface ChatState {
   users: UserDto[];
   recentChats: RecentChatDto[];
+  customGroups: GroupDto[];
   groupMessages: MessageDto[];
+  customGroupMessages: Record<string, MessageDto[]>;
   directMessages: Record<string, MessageDto[]>;
   selectedUser: UserDto | null;
+  selectedGroup: GroupDto | null;
+  globalMuted: boolean;
+  notifications: NotificationDto[];
+  unreadCount: number;
   typingUsers: string[];
   setUsers: (users: UserDto[]) => void;
   patchUserPresence: (userId: string, isOnline: boolean, user?: UserDto) => void;
   setRecentChats: (chats: RecentChatDto[]) => void;
   bumpRecentChat: (msg: MessageDto, currentUserId: string) => void;
+  setCustomGroups: (groups: GroupDto[]) => void;
+  addCustomGroup: (group: GroupDto) => void;
+  removeCustomGroup: (groupId: string) => void;
+  updateGroupMute: (groupId: string, isMuted: boolean) => void;
+  setGlobalMuted: (muted: boolean) => void;
   setGroupMessages: (messages: MessageDto[]) => void;
   addGroupMessage: (message: MessageDto) => void;
+  setCustomGroupMessages: (groupId: string, messages: MessageDto[]) => void;
+  addCustomGroupMessage: (groupId: string, message: MessageDto) => void;
   setDirectMessages: (userId: string, messages: MessageDto[]) => void;
   addDirectMessage: (otherUserId: string, message: MessageDto) => void;
   selectUser: (user: UserDto | null) => void;
+  selectGroup: (group: GroupDto | null) => void;
+  selectGlobal: () => void;
+  setNotifications: (items: NotificationDto[], unread: number) => void;
+  addNotification: (n: NotificationDto) => void;
+  markNotificationsRead: (ids?: string[]) => void;
   setTyping: (username: string, isTyping: boolean) => void;
   clearAll: () => void;
   updateUser: (user: UserDto) => void;
-  removeMessage: (messageId: string) => void;
+  removeMessage: (messageId: string, groupId?: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
   users: [],
   recentChats: [],
+  customGroups: [],
   groupMessages: [],
+  customGroupMessages: {},
   directMessages: {},
   selectedUser: null,
+  selectedGroup: null,
+  globalMuted: false,
+  notifications: [],
+  unreadCount: 0,
   typingUsers: [],
 
   setUsers: (users) =>
     set((s) => {
       const selectedUser = s.selectedUser
-        ? users.find((u) => u.id === s.selectedUser!.id) ?? { ...s.selectedUser, isOnline: false }
+        ? findUserById(users, s.selectedUser.id) ?? { ...s.selectedUser, isOnline: false }
         : null;
-      const recentChats = s.recentChats.map((chat) => {
-        const live = users.find((u) => u.id === chat.userId);
-        return live ? { ...chat, isOnline: live.isOnline, username: live.username } : chat;
-      });
+      const recentChats = mergeRecentWithUsers(s.recentChats, users);
       return { users, selectedUser, recentChats };
     }),
 
   patchUserPresence: (userId, isOnline, user) =>
     set((s) => {
-      const exists = s.users.some((u) => u.id === userId);
+      const exists = s.users.some((u) => sameUserId(u.id, userId));
       const users = exists
-        ? s.users.map((u) => (u.id === userId ? { ...u, isOnline } : u))
+        ? s.users.map((u) => (sameUserId(u.id, userId) ? { ...u, isOnline } : u))
         : user
           ? [...s.users, user]
           : s.users;
       const selectedUser =
-        s.selectedUser?.id === userId ? { ...s.selectedUser, isOnline } : s.selectedUser;
+        s.selectedUser && sameUserId(s.selectedUser.id, userId)
+          ? { ...s.selectedUser, isOnline }
+          : s.selectedUser;
       const recentChats = s.recentChats.map((chat) =>
-        chat.userId === userId ? { ...chat, isOnline } : chat
+        sameUserId(chat.userId, userId) ? { ...chat, isOnline } : chat
       );
       return { users, selectedUser, recentChats };
     }),
 
-  setRecentChats: (recentChats) => set({ recentChats }),
+  setRecentChats: (recentChats) =>
+    set((s) => ({
+      recentChats: mergeRecentWithUsers(recentChats, s.users),
+    })),
 
   bumpRecentChat: (msg, currentUserId) =>
     set((s) => {
       const otherId =
         msg.senderId === currentUserId ? msg.recipientId! : msg.senderId;
-      const otherUser = s.users.find((u) => u.id === otherId);
+      const otherUser = findUserById(s.users, otherId);
       const username =
         otherUser?.username ??
         (msg.senderId === currentUserId ? '' : msg.senderUsername);
@@ -93,14 +120,53 @@ export const useChatStore = create<ChatState>((set) => ({
         lastMessageAt: msg.createdAt,
         lastMessagePreview: messagePreview(msg),
       };
-      const rest = s.recentChats.filter((c) => c.userId !== otherId);
+      const rest = s.recentChats.filter((c) => !sameUserId(c.userId, otherId));
       return { recentChats: [entry, ...rest] };
     }),
+
+  setCustomGroups: (customGroups) => set({ customGroups }),
+
+  addCustomGroup: (group) =>
+    set((s) => ({ customGroups: [group, ...s.customGroups.filter((g) => g.id !== group.id)] })),
+
+  removeCustomGroup: (groupId) =>
+    set((s) => ({
+      customGroups: s.customGroups.filter((g) => g.id !== groupId),
+      selectedGroup: s.selectedGroup?.id === groupId ? null : s.selectedGroup,
+      customGroupMessages: Object.fromEntries(
+        Object.entries(s.customGroupMessages).filter(([id]) => id !== groupId)
+      ),
+    })),
+
+  updateGroupMute: (groupId, isMuted) =>
+    set((s) => ({
+      customGroups: s.customGroups.map((g) => (g.id === groupId ? { ...g, isMuted } : g)),
+      selectedGroup:
+        s.selectedGroup?.id === groupId ? { ...s.selectedGroup, isMuted } : s.selectedGroup,
+    })),
+
+  setGlobalMuted: (globalMuted) => set({ globalMuted }),
 
   setGroupMessages: (messages) => set({ groupMessages: messages }),
 
   addGroupMessage: (message) =>
     set((s) => ({ groupMessages: [...s.groupMessages, message] })),
+
+  setCustomGroupMessages: (groupId, messages) =>
+    set((s) => ({
+      customGroupMessages: { ...s.customGroupMessages, [groupId]: messages },
+    })),
+
+  addCustomGroupMessage: (groupId, message) =>
+    set((s) => {
+      const existing = s.customGroupMessages[groupId] || [];
+      return {
+        customGroupMessages: {
+          ...s.customGroupMessages,
+          [groupId]: [...existing, message],
+        },
+      };
+    }),
 
   setDirectMessages: (userId, messages) =>
     set((s) => ({
@@ -118,7 +184,29 @@ export const useChatStore = create<ChatState>((set) => ({
       };
     }),
 
-  selectUser: (user) => set({ selectedUser: user }),
+  selectUser: (user) => set({ selectedUser: user, selectedGroup: null }),
+
+  selectGroup: (group) => set({ selectedGroup: group, selectedUser: null }),
+
+  selectGlobal: () => set({ selectedUser: null, selectedGroup: null }),
+
+  setNotifications: (notifications, unreadCount) => set({ notifications, unreadCount }),
+
+  addNotification: (n) =>
+    set((s) => ({
+      notifications: [n, ...s.notifications],
+      unreadCount: s.unreadCount + (n.isRead ? 0 : 1),
+    })),
+
+  markNotificationsRead: (ids) =>
+    set((s) => {
+      const idSet = ids ? new Set(ids) : null;
+      const notifications = s.notifications.map((n) =>
+        !idSet || idSet.has(n.id) ? { ...n, isRead: true } : n
+      );
+      const unreadCount = notifications.filter((n) => !n.isRead).length;
+      return { notifications, unreadCount };
+    }),
 
   setTyping: (username, isTyping) =>
     set((s) => ({
@@ -130,27 +218,44 @@ export const useChatStore = create<ChatState>((set) => ({
   clearAll: () =>
     set({
       groupMessages: [],
+      customGroupMessages: {},
       directMessages: {},
       recentChats: [],
+      customGroups: [],
       typingUsers: [],
+      notifications: [],
+      unreadCount: 0,
     }),
 
   updateUser: (user) =>
     set((s) => ({
-      users: s.users.map((u) => (u.id === user.id ? user : u)),
+      users: s.users.map((u) => (sameUserId(u.id, user.id) ? user : u)),
       selectedUser:
-        s.selectedUser?.id === user.id ? user : s.selectedUser,
+        s.selectedUser && sameUserId(s.selectedUser.id, user.id) ? user : s.selectedUser,
     })),
 
-  removeMessage: (messageId) =>
+  removeMessage: (messageId, groupId) =>
     set((s) => {
       const directMessages: Record<string, MessageDto[]> = {};
       for (const [key, msgs] of Object.entries(s.directMessages)) {
         directMessages[key] = msgs.filter((m) => m.id !== messageId);
       }
+      if (groupId) {
+        const customGroupMessages = { ...s.customGroupMessages };
+        customGroupMessages[groupId] = (customGroupMessages[groupId] || []).filter(
+          (m) => m.id !== messageId
+        );
+        return { directMessages, customGroupMessages };
+      }
       return {
         groupMessages: s.groupMessages.filter((m) => m.id !== messageId),
         directMessages,
+        customGroupMessages: Object.fromEntries(
+          Object.entries(s.customGroupMessages).map(([gid, msgs]) => [
+            gid,
+            msgs.filter((m) => m.id !== messageId),
+          ])
+        ),
       };
     }),
 }));

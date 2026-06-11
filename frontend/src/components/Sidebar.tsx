@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useChatStore } from '../store/chatStore';
 import { useAuthStore } from '../store/authStore';
-import type { RecentChatDto, UserDto } from '../types';
+import { collectOnlineUsers, findUserById } from '../lib/users';
+import type { GroupDto, RecentChatDto, UserDto } from '../types';
 
 function LogoutIcon() {
   return (
@@ -27,7 +28,11 @@ function formatTime(iso: string) {
 interface Props {
   open: boolean;
   onClose: () => void;
-  onSelectUser: (user: UserDto | null) => void;
+  onSelectGlobal: () => void;
+  onSelectUser: (user: UserDto) => void;
+  onSelectGroup: (group: GroupDto) => void;
+  onCreateGroup: () => void;
+  onLeaveGroup: (groupId: string) => void;
   onOpenProfile: () => void;
   onLogout: () => void;
 }
@@ -67,17 +72,29 @@ function UserListItem({
   );
 }
 
-export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }: Props) {
+export function Sidebar({
+  open,
+  onClose,
+  onSelectGlobal,
+  onSelectUser,
+  onSelectGroup,
+  onCreateGroup,
+  onLeaveGroup,
+  onOpenProfile,
+  onLogout,
+}: Props) {
   const users = useChatStore((s) => s.users);
   const recentChats = useChatStore((s) => s.recentChats);
+  const customGroups = useChatStore((s) => s.customGroups);
   const selectedUser = useChatStore((s) => s.selectedUser);
+  const selectedGroup = useChatStore((s) => s.selectedGroup);
   const currentUser = useAuthStore((s) => s.user);
   const listRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
 
   const onlineUsers = useMemo(
-    () => users.filter((u) => u.isOnline),
-    [users]
+    () => collectOnlineUsers(users, recentChats),
+    [users, recentChats]
   );
 
   const searchResults = useMemo(() => {
@@ -87,13 +104,13 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
   }, [search, users]);
 
   const resolveUser = (chat: RecentChatDto): UserDto => {
-    const live = users.find((u) => u.id === chat.userId);
+    const live = findUserById(users, chat.userId);
     return {
       id: chat.userId,
       username: live?.username ?? chat.username,
       profilePictureUrl: live?.profilePictureUrl ?? chat.profilePictureUrl,
       isGuest: live?.isGuest ?? chat.isGuest,
-      isOnline: live?.isOnline ?? chat.isOnline,
+      isOnline: live?.isOnline || chat.isOnline,
     };
   };
 
@@ -150,6 +167,7 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
         </div>
       </div>
 
+      <div className="sidebar-body">
       {search.trim() && (
         <div className="sidebar-section">
           <p className="section-label">
@@ -185,8 +203,8 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
 
             <button
               type="button"
-              className={`user-item featured ${!selectedUser ? 'active' : ''}`}
-              onClick={() => onSelectUser(null)}
+              className={`user-item featured ${!selectedUser && !selectedGroup ? 'active' : ''}`}
+              onClick={onSelectGlobal}
             >
               <div className="user-item-accent" />
               <div className="user-avatar global">
@@ -202,6 +220,53 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
               </div>
               <span className="user-chevron">›</span>
             </button>
+
+            <div className="sidebar-group-actions">
+              <button type="button" className="btn-create-group" onClick={onCreateGroup}>
+                + New Group
+              </button>
+            </div>
+
+            {customGroups.length > 0 && (
+              <>
+                <p className="section-sublabel">My Groups</p>
+                <div className="user-list compact">
+                  {customGroups.map((group) => (
+                    <div key={group.id} className="group-item-row">
+                      <button
+                        type="button"
+                        className={`user-item ${selectedGroup?.id === group.id ? 'active' : ''}`}
+                        onClick={() => onSelectGroup(group)}
+                      >
+                        <div className="user-item-accent" />
+                        <div className="user-avatar global">
+                          {group.name[0]?.toUpperCase()}
+                        </div>
+                        <div className="user-info">
+                          <span className="user-name">
+                            {group.name}
+                            {group.isMuted && <span className="mute-indicator">🔕</span>}
+                          </span>
+                          <span className="user-status">{group.memberCount} members</span>
+                        </div>
+                        <span className="user-chevron">›</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="group-leave-btn"
+                        title="Leave group"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onLeaveGroup(group.id);
+                        }}
+                      >
+                        Leave
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
             {recentChats.length > 0 && (
               <>
@@ -224,7 +289,7 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
             )}
           </div>
 
-          <div className="sidebar-section flex-grow">
+          <div className="sidebar-section">
             <p className="section-label">
               <span className="section-icon">👥</span>
               Active Users
@@ -246,6 +311,7 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
           </div>
         </>
       )}
+      </div>
 
       <div className="sidebar-footer">
         <button type="button" className="profile-card" onClick={onOpenProfile}>

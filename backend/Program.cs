@@ -39,6 +39,7 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 });
+builder.Services.AddHttpClient();
 builder.Services.AddHttpClient("Supabase");
 builder.Services.AddHttpClient("LinkPreview", client =>
 {
@@ -51,6 +52,7 @@ builder.Services.AddSingleton<PresenceService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<StorageService>();
 builder.Services.AddScoped<LinkPreviewService>();
+builder.Services.AddScoped<NotificationService>();
 builder.Services.AddHostedService<CleanupService>();
 
 var jwtSecret = builder.Configuration["Jwt:Secret"]!;
@@ -74,7 +76,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             {
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
-                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/chat"))
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    (path.StartsWithSegments("/hubs/chat") || path.StartsWithSegments("/hubs/call")))
                     context.Token = accessToken;
                 return Task.CompletedTask;
             }
@@ -99,6 +102,19 @@ builder.Services.AddSignalR();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<DatabaseService>();
+    try
+    {
+        await db.EnsureFeatureSchemaAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Feature schema ensure skipped — run migration 004 if groups/mute fail.");
+    }
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -115,6 +131,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapHub<CallHub>("/hubs/call");
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 app.Run();

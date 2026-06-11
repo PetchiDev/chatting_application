@@ -149,7 +149,7 @@ export function AuthPage() {
             <button
               key={t}
               type="button"
-              ref={(el) => { tabButtonRefs.current[t] = el; }}
+              ref={(el) => { tabButtonRefs.current[t] = el ?? undefined; }}
               className={tab === t ? 'active' : ''}
               onClick={() => handleTabChange(t)}
             >

@@ -11,6 +11,8 @@ public static class MessageMapper
         username,
         profilePicture,
         m.RecipientId,
+        m.GroupId,
+        m.ForwardedFromId,
         m.Content,
         m.MessageType,
         m.AttachmentUrl,

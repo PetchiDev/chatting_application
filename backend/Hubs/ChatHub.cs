@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using ChatApi.DTOs;
 using ChatApi.Models;
 using ChatApi.Services;
@@ -15,14 +14,22 @@ public class ChatHub : Hub
     private readonly AuthService _auth;
     private readonly LinkPreviewService _linkPreview;
     private readonly StorageService _storage;
+    private readonly NotificationService _notifications;
 
-    public ChatHub(DatabaseService db, PresenceService presence, AuthService auth, LinkPreviewService linkPreview, StorageService storage)
+    public ChatHub(
+        DatabaseService db,
+        PresenceService presence,
+        AuthService auth,
+        LinkPreviewService linkPreview,
+        StorageService storage,
+        NotificationService notifications)
     {
         _db = db;
         _presence = presence;
         _auth = auth;
         _linkPreview = linkPreview;
         _storage = storage;
+        _notifications = notifications;
     }
 
     public override async Task OnConnectedAsync()
@@ -44,6 +51,10 @@ public class ChatHub : Hub
 
         _presence.UserConnected(userId.Value, Context.ConnectionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, "global");
+
+        var groupIds = await _db.GetUserGroupIdsAsync(userId.Value);
+        foreach (var groupId in groupIds)
+            await Groups.AddToGroupAsync(Context.ConnectionId, GroupChannel(groupId));
 
         var onlineUsers = await GetOnlineUsersAsync();
         await Clients.All.SendAsync("OnlineUsers", onlineUsers);
@@ -69,11 +80,16 @@ public class ChatHub : Hub
         var user = await _db.GetUserByIdAsync(userId.Value);
         if (user == null) return;
 
+        if (request.GroupId.HasValue && !await _db.IsGroupMemberAsync(request.GroupId.Value, userId.Value))
+            return;
+
         var message = new Message
         {
             Id = Guid.NewGuid(),
             SenderId = userId.Value,
             RecipientId = request.RecipientId,
+            GroupId = request.GroupId,
+            ForwardedFromId = request.ForwardedFromId,
             Content = request.Content,
             MessageType = request.MessageType ?? "text",
             AttachmentUrl = request.AttachmentUrl,
@@ -95,21 +111,55 @@ public class ChatHub : Hub
         await _db.InsertMessageAsync(message);
 
         var dto = MessageMapper.ToDto(message, user.Username, user.ProfilePictureUrl);
+        var previewText = GetMessagePreview(message);
 
-        if (request.RecipientId.HasValue)
+        if (request.GroupId.HasValue)
+        {
+            await Clients.Group(GroupChannel(request.GroupId.Value)).SendAsync("ReceiveGroupMessage", dto);
+            var members = await _db.GetGroupMemberIdsAsync(request.GroupId.Value);
+            await _notifications.NotifyGroupMembersAsync(
+                request.GroupId.Value, userId.Value, user.Username, previewText, message.Id, members);
+        }
+        else if (request.RecipientId.HasValue)
         {
             var recipientConn = _presence.GetConnectionId(request.RecipientId.Value);
             if (recipientConn != null)
                 await Clients.Client(recipientConn).SendAsync("ReceiveDirectMessage", dto);
             await Clients.Caller.SendAsync("ReceiveDirectMessage", dto);
+
+            await _notifications.NotifyMessageAsync(
+                request.RecipientId.Value, user.Username, previewText, "dm", userId.Value, message.Id);
         }
         else
         {
             await Clients.Group("global").SendAsync("ReceiveMessage", dto);
+
+            var allUsers = await _db.GetAllUsersAsync();
+            foreach (var u in allUsers.Where(u => u.Id != userId.Value))
+                await _notifications.NotifyMessageAsync(
+                    u.Id, user.Username, previewText, "global", null, message.Id);
         }
     }
 
-    public async Task SendTyping(Guid? recipientId, bool isTyping)
+    public async Task ForwardMessage(ForwardMessageRequest request)
+    {
+        var userId = GetUserId();
+        if (userId == null) return;
+
+        var source = await _db.GetMessageByIdAsync(request.MessageId);
+        if (source == null) return;
+
+        await SendMessage(new SendMessageRequest(
+            source.Content,
+            source.MessageType,
+            request.RecipientId,
+            request.GroupId,
+            source.AttachmentUrl,
+            source.AttachmentName,
+            source.Id));
+    }
+
+    public async Task SendTyping(Guid? recipientId, Guid? groupId, bool isTyping)
     {
         var userId = GetUserId();
         if (userId == null) return;
@@ -117,15 +167,20 @@ public class ChatHub : Hub
         var user = await _db.GetUserByIdAsync(userId.Value);
         if (user == null) return;
 
-        if (recipientId.HasValue)
+        if (groupId.HasValue)
+        {
+            await Clients.OthersInGroup(GroupChannel(groupId.Value))
+                .SendAsync("UserTyping", user.Username, isTyping, groupId);
+        }
+        else if (recipientId.HasValue)
         {
             var conn = _presence.GetConnectionId(recipientId.Value);
             if (conn != null)
-                await Clients.Client(conn).SendAsync("UserTyping", user.Username, isTyping);
+                await Clients.Client(conn).SendAsync("UserTyping", user.Username, isTyping, null);
         }
         else
         {
-            await Clients.Others.SendAsync("UserTyping", user.Username, isTyping);
+            await Clients.Others.SendAsync("UserTyping", user.Username, isTyping, null);
         }
     }
 
@@ -154,20 +209,24 @@ public class ChatHub : Hub
 
             await _db.DeleteMessageAsync(messageId);
 
-            var deleted = new MessageDeletedDto(messageId, message.RecipientId, true);
+            var deleted = new MessageDeletedDto(messageId, message.RecipientId, message.GroupId, true);
             await BroadcastMessageDeletedAsync(message, deleted);
         }
         else
         {
             await _db.HideMessageForUserAsync(userId.Value, messageId);
-            var deleted = new MessageDeletedDto(messageId, message.RecipientId, false);
+            var deleted = new MessageDeletedDto(messageId, message.RecipientId, message.GroupId, false);
             await Clients.Caller.SendAsync("MessageDeleted", deleted);
         }
     }
 
     private async Task BroadcastMessageDeletedAsync(Message message, MessageDeletedDto deleted)
     {
-        if (message.RecipientId.HasValue)
+        if (message.GroupId.HasValue)
+        {
+            await Clients.Group(GroupChannel(message.GroupId.Value)).SendAsync("MessageDeleted", deleted);
+        }
+        else if (message.RecipientId.HasValue)
         {
             var recipientConn = _presence.GetConnectionId(message.RecipientId.Value);
             if (recipientConn != null)
@@ -178,6 +237,21 @@ public class ChatHub : Hub
         {
             await Clients.Group("global").SendAsync("MessageDeleted", deleted);
         }
+    }
+
+    private static string GroupChannel(Guid groupId) => $"chat-group-{groupId}";
+
+    private static string GetMessagePreview(Message message)
+    {
+        if (!string.IsNullOrWhiteSpace(message.Content))
+            return message.Content.Length > 120 ? message.Content[..120] + "…" : message.Content;
+        return message.MessageType switch
+        {
+            "image" => "📷 Image",
+            "file" => $"📎 {message.AttachmentName ?? "File"}",
+            "audio" => "🎤 Voice message",
+            _ => "New message"
+        };
     }
 
     private Guid? GetUserId() => _auth.GetUserIdFromClaims(Context.User!);

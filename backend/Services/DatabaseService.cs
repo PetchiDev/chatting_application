@@ -3,7 +3,7 @@ using Npgsql;
 
 namespace ChatApi.Services;
 
-public class DatabaseService
+public partial class DatabaseService
 {
     private readonly string _connectionString;
 
@@ -126,7 +126,7 @@ public class DatabaseService
                      u.username, u.profile_picture_url
               FROM messages m
               JOIN users u ON u.id = m.sender_id
-              WHERE m.recipient_id IS NULL
+              WHERE m.recipient_id IS NULL AND m.group_id IS NULL
               {HiddenFilter}
               ORDER BY m.created_at DESC
               LIMIT @limit", conn);
@@ -164,7 +164,7 @@ public class DatabaseService
         await using var conn = CreateConnection();
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(
-            @"SELECT id, sender_id, recipient_id, content, message_type,
+            @"SELECT id, sender_id, recipient_id, group_id, forwarded_from_id, content, message_type,
                      attachment_url, attachment_name, created_at,
                      link_url, link_title, link_description, link_image
               FROM messages WHERE id = @id", conn);
@@ -177,15 +177,17 @@ public class DatabaseService
             Id = reader.GetGuid(0),
             SenderId = reader.GetGuid(1),
             RecipientId = reader.IsDBNull(2) ? null : reader.GetGuid(2),
-            Content = reader.IsDBNull(3) ? null : reader.GetString(3),
-            MessageType = reader.GetString(4),
-            AttachmentUrl = reader.IsDBNull(5) ? null : reader.GetString(5),
-            AttachmentName = reader.IsDBNull(6) ? null : reader.GetString(6),
-            CreatedAt = reader.GetDateTime(7),
-            LinkUrl = reader.IsDBNull(8) ? null : reader.GetString(8),
-            LinkTitle = reader.IsDBNull(9) ? null : reader.GetString(9),
-            LinkDescription = reader.IsDBNull(10) ? null : reader.GetString(10),
-            LinkImage = reader.IsDBNull(11) ? null : reader.GetString(11)
+            GroupId = reader.IsDBNull(3) ? null : reader.GetGuid(3),
+            ForwardedFromId = reader.IsDBNull(4) ? null : reader.GetGuid(4),
+            Content = reader.IsDBNull(5) ? null : reader.GetString(5),
+            MessageType = reader.GetString(6),
+            AttachmentUrl = reader.IsDBNull(7) ? null : reader.GetString(7),
+            AttachmentName = reader.IsDBNull(8) ? null : reader.GetString(8),
+            CreatedAt = reader.GetDateTime(9),
+            LinkUrl = reader.IsDBNull(10) ? null : reader.GetString(10),
+            LinkTitle = reader.IsDBNull(11) ? null : reader.GetString(11),
+            LinkDescription = reader.IsDBNull(12) ? null : reader.GetString(12),
+            LinkImage = reader.IsDBNull(13) ? null : reader.GetString(13)
         };
     }
 
@@ -216,14 +218,16 @@ public class DatabaseService
         await using var conn = CreateConnection();
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand(
-            @"INSERT INTO messages (id, sender_id, recipient_id, content, message_type, attachment_url, attachment_name,
-                                   link_url, link_title, link_description, link_image)
-              VALUES (@id, @sender_id, @recipient_id, @content, @message_type, @attachment_url, @attachment_name,
-                      @link_url, @link_title, @link_description, @link_image)
+            @"INSERT INTO messages (id, sender_id, recipient_id, group_id, forwarded_from_id, content, message_type,
+                                   attachment_url, attachment_name, link_url, link_title, link_description, link_image)
+              VALUES (@id, @sender_id, @recipient_id, @group_id, @forwarded_from_id, @content, @message_type,
+                      @attachment_url, @attachment_name, @link_url, @link_title, @link_description, @link_image)
               RETURNING created_at", conn);
         cmd.Parameters.AddWithValue("id", message.Id);
         cmd.Parameters.AddWithValue("sender_id", message.SenderId);
         cmd.Parameters.AddWithValue("recipient_id", (object?)message.RecipientId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("group_id", (object?)message.GroupId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("forwarded_from_id", (object?)message.ForwardedFromId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("content", (object?)message.Content ?? DBNull.Value);
         cmd.Parameters.AddWithValue("message_type", message.MessageType);
         cmd.Parameters.AddWithValue("attachment_url", (object?)message.AttachmentUrl ?? DBNull.Value);
