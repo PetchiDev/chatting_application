@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import gsap from 'gsap';
 import { useChatStore } from '../store/chatStore';
+import { normalizeUserId } from '../lib/users';
 import { useAuthStore } from '../store/authStore';
 import { MessageBubble } from './MessageBubble';
 import { VoiceRecorder } from './VoiceRecorder';
@@ -15,6 +16,36 @@ function LogoutIcon() {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       <polyline points="16 17 21 12 16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function BellOnIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function BellOffIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M13.73 21a2 2 0 0 1-3.46 0M18 8a6 6 0 0 0-9.33-5.2M6 8c0 7-3 9-3 9h11.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <line x1="2" y1="2" x2="22" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -52,9 +83,11 @@ export function ChatWindow({
   const directMessages = useChatStore((s) => s.directMessages);
   const typingUsers = useChatStore((s) => s.typingUsers);
   const globalMuted = useChatStore((s) => s.globalMuted);
+  const dmMutes = useChatStore((s) => s.dmMutes);
   const setDirectMessages = useChatStore((s) => s.setDirectMessages);
   const setCustomGroupMessages = useChatStore((s) => s.setCustomGroupMessages);
   const setGlobalMuted = useChatStore((s) => s.setGlobalMuted);
+  const setDmMuted = useChatStore((s) => s.setDmMuted);
   const updateGroupMute = useChatStore((s) => s.updateGroupMute);
 
   const [text, setText] = useState('');
@@ -76,7 +109,13 @@ export function ChatWindow({
 
   const title = selectedUser?.username ?? selectedGroup?.name ?? 'Group Chat';
   const isOnline = selectedUser?.isOnline;
-  const isMuted = selectedGroup?.isMuted ?? (isGlobal ? globalMuted : false);
+  const isMuted = selectedGroup
+    ? selectedGroup.isMuted
+    : isGlobal
+      ? globalMuted
+      : selectedUser
+        ? Boolean(dmMutes[normalizeUserId(selectedUser.id)])
+        : false;
 
   const messageOptions: SendMessageOptions = {
     recipientId: selectedUser?.id,
@@ -168,6 +207,7 @@ export function ChatWindow({
         updateGroupMute(selectedGroup.id, next);
       } else if (selectedUser) {
         await api.setMute(user.token, 'dm', selectedUser.id, next);
+        setDmMuted(selectedUser.id, next);
       }
     } catch {
       alert('Could not update mute setting. Please try again.');
@@ -248,12 +288,13 @@ export function ChatWindow({
             )}
             <button
               type="button"
-              className={`header-icon-btn ${isMuted ? 'active' : ''}`}
+              className={`header-icon-btn mute-toggle-btn ${isMuted ? 'is-muted' : ''}`}
               onClick={handleToggleMute}
               title={isMuted ? 'Unmute notifications' : 'Mute notifications'}
-              aria-label="Toggle mute"
+              aria-label={isMuted ? 'Unmute notifications' : 'Mute notifications'}
+              aria-pressed={isMuted}
             >
-              {isMuted ? '🔕' : '🔔'}
+              {isMuted ? <BellOffIcon /> : <BellOnIcon />}
             </button>
             <NotificationPanel onNavigate={onNotificationNavigate} />
             <button type="button" className="btn-logout header-signout" onClick={onLogout}>

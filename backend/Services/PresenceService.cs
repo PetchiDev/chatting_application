@@ -50,4 +50,6 @@ public class PresenceService
         _callConnections.TryGetValue(userId, out var conn) ? conn : null;
 
     public IReadOnlyCollection<Guid> GetOnlineUserIds() => _connections.Keys.ToList();
+
+    public bool IsUserOnline(Guid userId) => _connections.ContainsKey(userId);
 }

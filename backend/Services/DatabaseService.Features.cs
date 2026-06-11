@@ -124,6 +124,33 @@ public partial class DatabaseService
         return groups;
     }
 
+    public async Task<ChatGroup?> GetGroupForMemberAsync(Guid groupId, Guid userId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            @"SELECT g.id, g.name, g.created_by, g.created_at,
+                     (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id AND gm.left_at IS NULL) AS member_count,
+                     EXISTS(SELECT 1 FROM conversation_mutes cm
+                            WHERE cm.user_id = @userId AND cm.channel_type = 'group' AND cm.channel_id = g.id) AS is_muted
+              FROM chat_groups g
+              JOIN group_members m ON m.group_id = g.id AND m.user_id = @userId AND m.left_at IS NULL
+              WHERE g.id = @groupId", conn);
+        cmd.Parameters.AddWithValue("userId", userId);
+        cmd.Parameters.AddWithValue("groupId", groupId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return null;
+        return new ChatGroup
+        {
+            Id = reader.GetGuid(0),
+            Name = reader.GetString(1),
+            CreatedBy = reader.GetGuid(2),
+            CreatedAt = reader.GetDateTime(3),
+            MemberCount = reader.GetInt32(4),
+            IsMuted = reader.GetBoolean(5)
+        };
+    }
+
     public async Task<bool> IsGroupMemberAsync(Guid groupId, Guid userId)
     {
         await using var conn = CreateConnection();
@@ -225,6 +252,30 @@ public partial class DatabaseService
         cmd.Parameters.AddWithValue("type", channelType);
         cmd.Parameters.AddWithValue("cid", cid);
         return await cmd.ExecuteScalarAsync() != null;
+    }
+
+    public async Task<bool> IsNotificationMutedAsync(Guid userId, string channelType, Guid? channelId)
+    {
+        if (await IsMutedAsync(userId, "global", null)) return true;
+        return await IsMutedAsync(userId, channelType, channelId);
+    }
+
+    public async Task<List<(string ChannelType, Guid? ChannelId)>> GetConversationMutesAsync(Guid userId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            @"SELECT channel_type, channel_id FROM conversation_mutes WHERE user_id = @uid", conn);
+        cmd.Parameters.AddWithValue("uid", userId);
+        var list = new List<(string, Guid?)>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var type = reader.GetString(0);
+            var cid = reader.GetGuid(1);
+            list.Add((type, cid == GlobalChannelId ? null : cid));
+        }
+        return list;
     }
 
     public async Task<AppNotification> CreateNotificationAsync(Guid userId, string title, string body, string channelType, Guid? channelId, Guid? messageId)

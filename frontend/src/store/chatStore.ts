@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { findUserById, mergeRecentWithUsers, sameUserId } from '../lib/users';
-import type { GroupDto, MessageDto, NotificationDto, RecentChatDto, UserDto } from '../types';
+import { findUserById, mergeRecentWithUsers, normalizeUserId, sameUserId } from '../lib/users';
+import type { GroupDto, MessageDto, MuteEntryDto, NotificationDto, RecentChatDto, UserDto } from '../types';
 
 function messagePreview(msg: MessageDto): string {
   switch (msg.messageType) {
@@ -25,10 +25,12 @@ interface ChatState {
   selectedUser: UserDto | null;
   selectedGroup: GroupDto | null;
   globalMuted: boolean;
+  dmMutes: Record<string, boolean>;
   notifications: NotificationDto[];
   unreadCount: number;
   typingUsers: string[];
   setUsers: (users: UserDto[]) => void;
+  mergeUserProfiles: (users: UserDto[]) => void;
   patchUserPresence: (userId: string, isOnline: boolean, user?: UserDto) => void;
   setRecentChats: (chats: RecentChatDto[]) => void;
   bumpRecentChat: (msg: MessageDto, currentUserId: string) => void;
@@ -37,6 +39,8 @@ interface ChatState {
   removeCustomGroup: (groupId: string) => void;
   updateGroupMute: (groupId: string, isMuted: boolean) => void;
   setGlobalMuted: (muted: boolean) => void;
+  setDmMuted: (userId: string, muted: boolean) => void;
+  applyMutes: (entries: MuteEntryDto[]) => void;
   setGroupMessages: (messages: MessageDto[]) => void;
   addGroupMessage: (message: MessageDto) => void;
   setCustomGroupMessages: (groupId: string, messages: MessageDto[]) => void;
@@ -65,12 +69,29 @@ export const useChatStore = create<ChatState>((set) => ({
   selectedUser: null,
   selectedGroup: null,
   globalMuted: false,
+  dmMutes: {},
   notifications: [],
   unreadCount: 0,
   typingUsers: [],
 
   setUsers: (users) =>
     set((s) => {
+      const selectedUser = s.selectedUser
+        ? findUserById(users, s.selectedUser.id) ?? { ...s.selectedUser, isOnline: false }
+        : null;
+      const recentChats = mergeRecentWithUsers(s.recentChats, users);
+      return { users, selectedUser, recentChats };
+    }),
+
+  mergeUserProfiles: (incoming) =>
+    set((s) => {
+      const users =
+        s.users.length === 0
+          ? incoming
+          : incoming.map((inc) => {
+              const existing = findUserById(s.users, inc.id);
+              return existing ? { ...inc, isOnline: existing.isOnline } : inc;
+            });
       const selectedUser = s.selectedUser
         ? findUserById(users, s.selectedUser.id) ?? { ...s.selectedUser, isOnline: false }
         : null;
@@ -103,20 +124,18 @@ export const useChatStore = create<ChatState>((set) => ({
 
   bumpRecentChat: (msg, currentUserId) =>
     set((s) => {
-      const otherId =
-        msg.senderId === currentUserId ? msg.recipientId! : msg.senderId;
+      const fromSelf = sameUserId(msg.senderId, currentUserId);
+      const otherId = fromSelf ? msg.recipientId! : msg.senderId;
       const otherUser = findUserById(s.users, otherId);
       const username =
-        otherUser?.username ??
-        (msg.senderId === currentUserId ? '' : msg.senderUsername);
+        otherUser?.username ?? (fromSelf ? '' : msg.senderUsername);
       const entry: RecentChatDto = {
         userId: otherId,
         username,
         profilePictureUrl:
-          otherUser?.profilePictureUrl ??
-          (msg.senderId === currentUserId ? undefined : msg.senderProfilePicture),
+          otherUser?.profilePictureUrl ?? (fromSelf ? undefined : msg.senderProfilePicture),
         isGuest: otherUser?.isGuest ?? false,
-        isOnline: otherUser?.isOnline ?? false,
+        isOnline: otherUser?.isOnline ?? !fromSelf,
         lastMessageAt: msg.createdAt,
         lastMessagePreview: messagePreview(msg),
       };
@@ -146,6 +165,29 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
 
   setGlobalMuted: (globalMuted) => set({ globalMuted }),
+
+  setDmMuted: (userId, muted) =>
+    set((s) => {
+      const key = normalizeUserId(userId);
+      const dmMutes = { ...s.dmMutes };
+      if (muted) dmMutes[key] = true;
+      else delete dmMutes[key];
+      return { dmMutes };
+    }),
+
+  applyMutes: (entries) =>
+    set(() => {
+      let globalMuted = false;
+      const dmMutes: Record<string, boolean> = {};
+      for (const entry of entries) {
+        if (entry.channelType === 'global') {
+          globalMuted = true;
+        } else if (entry.channelType === 'dm' && entry.channelId) {
+          dmMutes[normalizeUserId(entry.channelId)] = true;
+        }
+      }
+      return { globalMuted, dmMutes };
+    }),
 
   setGroupMessages: (messages) => set({ groupMessages: messages }),
 
@@ -193,10 +235,16 @@ export const useChatStore = create<ChatState>((set) => ({
   setNotifications: (notifications, unreadCount) => set({ notifications, unreadCount }),
 
   addNotification: (n) =>
-    set((s) => ({
-      notifications: [n, ...s.notifications],
-      unreadCount: s.unreadCount + (n.isRead ? 0 : 1),
-    })),
+    set((s) => {
+      const exists = s.notifications.some(
+        (x) => x.id === n.id || (n.messageId != null && x.messageId === n.messageId)
+      );
+      if (exists) return s;
+      return {
+        notifications: [n, ...s.notifications],
+        unreadCount: s.unreadCount + (n.isRead ? 0 : 1),
+      };
+    }),
 
   markNotificationsRead: (ids) =>
     set((s) => {
@@ -229,9 +277,13 @@ export const useChatStore = create<ChatState>((set) => ({
 
   updateUser: (user) =>
     set((s) => ({
-      users: s.users.map((u) => (sameUserId(u.id, user.id) ? user : u)),
+      users: s.users.map((u) =>
+        sameUserId(u.id, user.id) ? { ...user, isOnline: user.isOnline || u.isOnline } : u
+      ),
       selectedUser:
-        s.selectedUser && sameUserId(s.selectedUser.id, user.id) ? user : s.selectedUser,
+        s.selectedUser && sameUserId(s.selectedUser.id, user.id)
+          ? { ...user, isOnline: user.isOnline || s.selectedUser.isOnline }
+          : s.selectedUser,
     })),
 
   removeMessage: (messageId, groupId) =>

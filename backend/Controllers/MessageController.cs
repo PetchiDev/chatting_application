@@ -45,7 +45,6 @@ public class MessageController : ControllerBase
         var userId = _auth.GetUserIdFromClaims(User);
         if (userId == null) return Unauthorized();
 
-        var onlineIds = presence.GetOnlineUserIds();
         var recent = await _db.GetRecentDirectChatsAsync(userId.Value);
 
         return Ok(recent.Select(r => new RecentChatDto(
@@ -53,7 +52,7 @@ public class MessageController : ControllerBase
             r.Username,
             r.ProfilePictureUrl,
             r.IsGuest,
-            onlineIds.Contains(r.UserId),
+            presence.IsUserOnline(r.UserId),
             r.LastMessageAt,
             PreviewMessage(r.Content, r.MessageType)
         )).ToList());
@@ -62,13 +61,17 @@ public class MessageController : ControllerBase
     [HttpGet("users")]
     public async Task<ActionResult<List<UserDto>>> GetUsers([FromServices] PresenceService presence)
     {
-        var onlineIds = presence.GetOnlineUserIds();
         var users = await _db.GetAllUsersAsync();
         var currentUserId = _auth.GetUserIdFromClaims(User);
 
         return Ok(users
             .Where(u => u.Id != currentUserId)
-            .Select(u => new UserDto(u.Id, u.Username, u.ProfilePictureUrl, u.IsGuest, onlineIds.Contains(u.Id)))
+            .Select(u => new UserDto(
+                u.Id,
+                u.Username,
+                u.ProfilePictureUrl,
+                u.IsGuest,
+                presence.IsUserOnline(u.Id)))
             .ToList());
     }
 

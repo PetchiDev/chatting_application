@@ -8,6 +8,8 @@ public record GroupDto(Guid Id, string Name, Guid CreatedBy, DateTime CreatedAt,
 
 public record MuteRequest(string ChannelType, Guid? ChannelId, bool Muted);
 
+public record MuteEntryDto(string ChannelType, Guid? ChannelId);
+
 public record ForwardMessageRequest(Guid MessageId, Guid? RecipientId, Guid? GroupId);
 
 public record PushSubscribeRequest(string Endpoint, string P256dh, string Auth);

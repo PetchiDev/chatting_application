@@ -26,6 +26,11 @@ export interface RecentChatDto {
   lastMessagePreview?: string;
 }
 
+export interface MuteEntryDto {
+  channelType: 'global' | 'dm' | 'group';
+  channelId?: string;
+}
+
 export interface GroupDto {
   id: string;
   name: string;

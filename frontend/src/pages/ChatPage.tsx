@@ -10,6 +10,7 @@ import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useChatStore } from '../store/chatStore';
 import { useAuthStore } from '../store/authStore';
 import type { GroupDto, NotificationDto, UserDto } from '../types';
+import { findGroupById, resolveUserForNotification } from '../lib/users';
 import * as api from '../lib/api';
 
 export function ChatPage() {
@@ -19,6 +20,7 @@ export function ChatPage() {
   const selectGroup = useChatStore((s) => s.selectGroup);
   const selectGlobal = useChatStore((s) => s.selectGlobal);
   const users = useChatStore((s) => s.users);
+  const recentChats = useChatStore((s) => s.recentChats);
   const customGroups = useChatStore((s) => s.customGroups);
   const selectedUser = useChatStore((s) => s.selectedUser);
   const selectedGroup = useChatStore((s) => s.selectedGroup);
@@ -81,15 +83,22 @@ export function ChatPage() {
   };
 
   const handleNotificationNavigate = (n: NotificationDto) => {
-    if (n.channelType === 'dm' && n.channelId) {
-      const u = users.find((x) => x.id === n.channelId);
-      if (u) selectUser(u);
-    } else if (n.channelType === 'group' && n.channelId) {
-      const g = customGroups.find((x) => x.id === n.channelId);
-      if (g) selectGroup(g);
-    } else {
-      selectGlobal();
+    const channelType = n.channelType?.toLowerCase();
+
+    if (channelType === 'dm' && n.channelId) {
+      handleSelectUser(resolveUserForNotification(n.channelId, n.title, users, recentChats));
+      return;
     }
+
+    if (channelType === 'group' && n.channelId) {
+      const g = findGroupById(customGroups, n.channelId);
+      if (g) {
+        handleSelectGroup(g);
+        return;
+      }
+    }
+
+    handleSelectGlobal();
   };
 
   return (
@@ -132,7 +141,15 @@ export function ChatPage() {
           call={activeCall}
           localStream={localStream}
           remoteStreams={remoteStreams}
-          onAccept={acceptCall}
+          onAccept={async () => {
+            try {
+              await acceptCall();
+            } catch (err) {
+              console.error(err);
+              alert('Could not accept call. Allow camera/microphone and try again.');
+              hangUp();
+            }
+          }}
           onHangUp={hangUp}
         />
       )}

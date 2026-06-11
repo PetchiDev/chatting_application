@@ -15,6 +15,7 @@ public class ChatHub : Hub
     private readonly LinkPreviewService _linkPreview;
     private readonly StorageService _storage;
     private readonly NotificationService _notifications;
+    private readonly ILogger<ChatHub> _logger;
 
     public ChatHub(
         DatabaseService db,
@@ -22,7 +23,8 @@ public class ChatHub : Hub
         AuthService auth,
         LinkPreviewService linkPreview,
         StorageService storage,
-        NotificationService notifications)
+        NotificationService notifications,
+        ILogger<ChatHub> logger)
     {
         _db = db;
         _presence = presence;
@@ -30,6 +32,7 @@ public class ChatHub : Hub
         _linkPreview = linkPreview;
         _storage = storage;
         _notifications = notifications;
+        _logger = logger;
     }
 
     public override async Task OnConnectedAsync()
@@ -117,8 +120,15 @@ public class ChatHub : Hub
         {
             await Clients.Group(GroupChannel(request.GroupId.Value)).SendAsync("ReceiveGroupMessage", dto);
             var members = await _db.GetGroupMemberIdsAsync(request.GroupId.Value);
-            await _notifications.NotifyGroupMembersAsync(
-                request.GroupId.Value, userId.Value, user.Username, previewText, message.Id, members);
+            try
+            {
+                await _notifications.NotifyGroupMembersAsync(
+                    request.GroupId.Value, userId.Value, user.Username, previewText, message.Id, members);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send group notifications for message {MessageId}", message.Id);
+            }
         }
         else if (request.RecipientId.HasValue)
         {
@@ -127,8 +137,15 @@ public class ChatHub : Hub
                 await Clients.Client(recipientConn).SendAsync("ReceiveDirectMessage", dto);
             await Clients.Caller.SendAsync("ReceiveDirectMessage", dto);
 
-            await _notifications.NotifyMessageAsync(
-                request.RecipientId.Value, user.Username, previewText, "dm", userId.Value, message.Id);
+            try
+            {
+                await _notifications.NotifyMessageAsync(
+                    request.RecipientId.Value, user.Username, previewText, "dm", userId.Value, message.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send DM notification for message {MessageId}", message.Id);
+            }
         }
         else
         {
@@ -136,8 +153,17 @@ public class ChatHub : Hub
 
             var allUsers = await _db.GetAllUsersAsync();
             foreach (var u in allUsers.Where(u => u.Id != userId.Value))
-                await _notifications.NotifyMessageAsync(
-                    u.Id, user.Username, previewText, "global", null, message.Id);
+            {
+                try
+                {
+                    await _notifications.NotifyMessageAsync(
+                        u.Id, user.Username, previewText, "global", null, message.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send global notification for message {MessageId}", message.Id);
+                }
+            }
         }
     }
 
@@ -239,7 +265,7 @@ public class ChatHub : Hub
         }
     }
 
-    private static string GroupChannel(Guid groupId) => $"chat-group-{groupId}";
+    public static string GroupChannel(Guid groupId) => $"chat-group-{groupId}";
 
     private static string GetMessagePreview(Message message)
     {
@@ -258,10 +284,14 @@ public class ChatHub : Hub
 
     private async Task<List<UserDto>> GetOnlineUsersAsync()
     {
-        var onlineIds = _presence.GetOnlineUserIds();
         var allUsers = await _db.GetAllUsersAsync();
         return allUsers
-            .Select(u => new UserDto(u.Id, u.Username, u.ProfilePictureUrl, u.IsGuest, onlineIds.Contains(u.Id)))
+            .Select(u => new UserDto(
+                u.Id,
+                u.Username,
+                u.ProfilePictureUrl,
+                u.IsGuest,
+                _presence.IsUserOnline(u.Id)))
             .ToList();
     }
 }

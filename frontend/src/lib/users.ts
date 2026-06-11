@@ -1,4 +1,4 @@
-import type { RecentChatDto, UserDto } from '../types';
+import type { GroupDto, RecentChatDto, UserDto } from '../types';
 
 export function normalizeUserId(id: string) {
   return id.toLowerCase();
@@ -11,6 +11,41 @@ export function sameUserId(a: string, b: string) {
 export function findUserById(users: UserDto[], id: string) {
   const norm = normalizeUserId(id);
   return users.find((u) => normalizeUserId(u.id) === norm);
+}
+
+export function findGroupById(groups: GroupDto[], id: string) {
+  const norm = normalizeUserId(id);
+  return groups.find((g) => normalizeUserId(g.id) === norm);
+}
+
+export function userFromRecentChat(chat: RecentChatDto): UserDto {
+  return {
+    id: chat.userId,
+    username: chat.username,
+    profilePictureUrl: chat.profilePictureUrl,
+    isGuest: chat.isGuest,
+    isOnline: chat.isOnline,
+  };
+}
+
+export function resolveUserForNotification(
+  channelId: string,
+  title: string,
+  users: UserDto[],
+  recentChats: RecentChatDto[]
+): UserDto {
+  const known = findUserById(users, channelId);
+  if (known) return known;
+
+  const chat = recentChats.find((c) => sameUserId(c.userId, channelId));
+  if (chat) return userFromRecentChat(chat);
+
+  return {
+    id: channelId,
+    username: title,
+    isGuest: false,
+    isOnline: false,
+  };
 }
 
 export function mergeRecentWithUsers(recentChats: RecentChatDto[], users: UserDto[]): RecentChatDto[] {

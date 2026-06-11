@@ -1,7 +1,10 @@
 using ChatApi.DTOs;
+using ChatApi.Hubs;
+using ChatApi.Models;
 using ChatApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 
 namespace ChatApi.Controllers;
 
@@ -12,11 +15,19 @@ public class GroupController : ControllerBase
 {
     private readonly DatabaseService _db;
     private readonly AuthService _auth;
+    private readonly PresenceService _presence;
+    private readonly IHubContext<ChatHub> _hub;
 
-    public GroupController(DatabaseService db, AuthService auth)
+    public GroupController(
+        DatabaseService db,
+        AuthService auth,
+        PresenceService presence,
+        IHubContext<ChatHub> hub)
     {
         _db = db;
         _auth = auth;
+        _presence = presence;
+        _hub = hub;
     }
 
     [HttpGet]
@@ -25,7 +36,7 @@ public class GroupController : ControllerBase
         var userId = _auth.GetUserIdFromClaims(User);
         if (userId == null) return Unauthorized();
         var groups = await _db.GetUserGroupsAsync(userId.Value);
-        return Ok(groups.Select(g => new GroupDto(g.Id, g.Name, g.CreatedBy, g.CreatedAt, g.MemberCount, g.IsMuted)).ToList());
+        return Ok(groups.Select(ToDto).ToList());
     }
 
     [HttpPost]
@@ -36,7 +47,14 @@ public class GroupController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new { error = "Group name required" });
 
         var group = await _db.CreateGroupAsync(userId.Value, request.Name.Trim(), request.MemberIds ?? []);
-        return Ok(new GroupDto(group.Id, group.Name, group.CreatedBy, group.CreatedAt, group.MemberCount, false));
+        var dto = ToDto(group);
+
+        var memberIds = (request.MemberIds ?? [])
+            .Append(userId.Value)
+            .Distinct();
+        await SyncGroupMembershipAsync(group, memberIds, userId.Value);
+
+        return Ok(dto);
     }
 
     [HttpPost("{groupId:guid}/members")]
@@ -46,7 +64,13 @@ public class GroupController : ControllerBase
         if (userId == null) return Unauthorized();
         if (!await _db.IsGroupMemberAsync(groupId, userId.Value)) return Forbid();
 
-        await _db.AddGroupMembersAsync(groupId, request.MemberIds ?? []);
+        var newMemberIds = (request.MemberIds ?? []).Distinct().ToList();
+        await _db.AddGroupMembersAsync(groupId, newMemberIds);
+
+        var group = await _db.GetGroupForMemberAsync(groupId, userId.Value);
+        if (group != null && newMemberIds.Count > 0)
+            await SyncGroupMembershipAsync(group, newMemberIds, null);
+
         return Ok();
     }
 
@@ -56,6 +80,14 @@ public class GroupController : ControllerBase
         var userId = _auth.GetUserIdFromClaims(User);
         if (userId == null) return Unauthorized();
         await _db.LeaveGroupAsync(groupId, userId.Value);
+
+        var conn = _presence.GetConnectionId(userId.Value);
+        if (conn != null)
+        {
+            await _hub.Groups.RemoveFromGroupAsync(conn, ChatHub.GroupChannel(groupId));
+            await _hub.Clients.Client(conn).SendAsync("GroupRemoved", groupId);
+        }
+
         return Ok();
     }
 
@@ -68,6 +100,16 @@ public class GroupController : ControllerBase
 
         var messages = await _db.GetCustomGroupMessagesAsync(userId.Value, groupId);
         return Ok(messages.Select(m => MessageMapper.ToDto(m, m.SenderUsername ?? "", m.SenderProfilePicture)).ToList());
+    }
+
+    [HttpGet("mutes")]
+    public async Task<ActionResult<List<MuteEntryDto>>> GetMutes()
+    {
+        var userId = _auth.GetUserIdFromClaims(User);
+        if (userId == null) return Unauthorized();
+
+        var mutes = await _db.GetConversationMutesAsync(userId.Value);
+        return Ok(mutes.Select(m => new MuteEntryDto(m.ChannelType, m.ChannelId)).ToList());
     }
 
     [HttpPut("mute")]
@@ -97,4 +139,24 @@ public class GroupController : ControllerBase
             return StatusCode(500, new { error = "Failed to update mute setting", detail = ex.Message });
         }
     }
+
+    private async Task SyncGroupMembershipAsync(ChatGroup group, IEnumerable<Guid> memberIds, Guid? skipGroupAddedForUserId)
+    {
+        foreach (var memberId in memberIds)
+        {
+            var conn = _presence.GetConnectionId(memberId);
+            if (conn == null) continue;
+
+            await _hub.Groups.AddToGroupAsync(conn, ChatHub.GroupChannel(group.Id));
+
+            if (skipGroupAddedForUserId.HasValue && memberId == skipGroupAddedForUserId.Value)
+                continue;
+
+            var memberGroup = await _db.GetGroupForMemberAsync(group.Id, memberId) ?? group;
+            await _hub.Clients.Client(conn).SendAsync("GroupAdded", ToDto(memberGroup));
+        }
+    }
+
+    private static GroupDto ToDto(ChatGroup g) =>
+        new(g.Id, g.Name, g.CreatedBy, g.CreatedAt, g.MemberCount, g.IsMuted);
 }

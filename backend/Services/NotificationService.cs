@@ -35,7 +35,7 @@ public class NotificationService
         Guid? channelId,
         Guid messageId)
     {
-        if (await _db.IsMutedAsync(recipientUserId, channelType, channelId))
+        if (await _db.IsNotificationMutedAsync(recipientUserId, channelType, channelId))
             return;
 
         var title = channelType switch

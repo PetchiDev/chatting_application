@@ -1,4 +1,4 @@
-import type { AuthUser, GroupDto, MessageDto, NotificationDto, RecentChatDto, UserDto } from '../types';
+import type { AuthUser, GroupDto, MessageDto, MuteEntryDto, NotificationDto, RecentChatDto, UserDto } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -127,6 +127,13 @@ export async function getCustomGroupMessages(token: string, groupId: string) {
     headers: authHeaders(token),
   });
   return handleResponse<MessageDto[]>(res);
+}
+
+export async function getMutes(token: string) {
+  const res = await fetch(`${API_URL}/api/group/mutes`, {
+    headers: authHeaders(token),
+  });
+  return handleResponse<MuteEntryDto[]>(res);
 }
 
 export async function setMute(
