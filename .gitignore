@@ -1,0 +1,12 @@
+node_modules/
+scripts/node_modules/
+dist/
+bin/
+obj/
+.env
+.env.local
+backend/appsettings.json
+backend/appsettings.Development.json
+*.user
+.vs/
+.DS_Store
