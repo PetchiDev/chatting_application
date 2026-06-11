@@ -62,6 +62,37 @@ export function mergeRecentWithUsers(recentChats: RecentChatDto[], users: UserDt
   });
 }
 
+export function collectAllContacts(
+  selfUserId: string,
+  ...sources: UserDto[][]
+): UserDto[] {
+  const map = new Map<string, UserDto>();
+
+  for (const list of sources) {
+    for (const u of list) {
+      if (sameUserId(u.id, selfUserId)) continue;
+      const key = normalizeUserId(u.id);
+      const existing = map.get(key);
+      map.set(
+        key,
+        existing
+          ? {
+              ...u,
+              username: u.username || existing.username,
+              profilePictureUrl: u.profilePictureUrl ?? existing.profilePictureUrl,
+              isGuest: u.isGuest ?? existing.isGuest,
+              isOnline: u.isOnline || existing.isOnline,
+            }
+          : u
+      );
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    a.username.localeCompare(b.username, undefined, { sensitivity: 'base' })
+  );
+}
+
 export function collectOnlineUsers(users: UserDto[], recentChats: RecentChatDto[]): UserDto[] {
   const map = new Map<string, UserDto>();
 

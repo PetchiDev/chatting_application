@@ -85,13 +85,16 @@ export const useChatStore = create<ChatState>((set) => ({
 
   mergeUserProfiles: (incoming) =>
     set((s) => {
-      const users =
-        s.users.length === 0
-          ? incoming
-          : incoming.map((inc) => {
-              const existing = findUserById(s.users, inc.id);
-              return existing ? { ...inc, isOnline: existing.isOnline } : inc;
-            });
+      const map = new Map<string, UserDto>();
+      for (const u of s.users) {
+        map.set(normalizeUserId(u.id), u);
+      }
+      for (const inc of incoming) {
+        const key = normalizeUserId(inc.id);
+        const existing = map.get(key);
+        map.set(key, existing ? { ...inc, isOnline: existing.isOnline } : inc);
+      }
+      const users = Array.from(map.values());
       const selectedUser = s.selectedUser
         ? findUserById(users, s.selectedUser.id) ?? { ...s.selectedUser, isOnline: false }
         : null;
