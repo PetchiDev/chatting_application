@@ -1,4 +1,4 @@
-import type { AuthUser, MessageDto, UserDto } from '../types';
+import type { AuthUser, MessageDto, RecentChatDto, UserDto } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -73,6 +73,13 @@ export async function getDirectMessages(token: string, otherUserId: string) {
     headers: authHeaders(token),
   });
   return handleResponse<MessageDto[]>(res);
+}
+
+export async function getRecentChats(token: string) {
+  const res = await fetch(`${API_URL}/api/message/recent`, {
+    headers: authHeaders(token),
+  });
+  return handleResponse<RecentChatDto[]>(res);
 }
 
 export async function getUsers(token: string) {

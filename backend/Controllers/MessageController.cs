@@ -39,6 +39,26 @@ public class MessageController : ControllerBase
         return Ok(messages.Select(MapToDto));
     }
 
+    [HttpGet("recent")]
+    public async Task<ActionResult<List<RecentChatDto>>> GetRecentChats([FromServices] PresenceService presence)
+    {
+        var userId = _auth.GetUserIdFromClaims(User);
+        if (userId == null) return Unauthorized();
+
+        var onlineIds = presence.GetOnlineUserIds();
+        var recent = await _db.GetRecentDirectChatsAsync(userId.Value);
+
+        return Ok(recent.Select(r => new RecentChatDto(
+            r.UserId,
+            r.Username,
+            r.ProfilePictureUrl,
+            r.IsGuest,
+            onlineIds.Contains(r.UserId),
+            r.LastMessageAt,
+            PreviewMessage(r.Content, r.MessageType)
+        )).ToList());
+    }
+
     [HttpGet("users")]
     public async Task<ActionResult<List<UserDto>>> GetUsers([FromServices] PresenceService presence)
     {
@@ -54,4 +74,13 @@ public class MessageController : ControllerBase
 
     private static MessageDto MapToDto(Models.Message m) =>
         MessageMapper.ToDto(m, m.SenderUsername ?? "", m.SenderProfilePicture);
+
+    private static string? PreviewMessage(string? content, string messageType) =>
+        messageType switch
+        {
+            "image" => "Photo",
+            "audio" => "Voice message",
+            "file" => string.IsNullOrWhiteSpace(content) ? "Attachment" : content,
+            _ => content
+        };
 }

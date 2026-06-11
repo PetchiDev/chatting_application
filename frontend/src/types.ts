@@ -16,6 +16,16 @@ export interface UserDto {
   isOnline: boolean;
 }
 
+export interface RecentChatDto {
+  userId: string;
+  username: string;
+  profilePictureUrl?: string;
+  isGuest: boolean;
+  isOnline: boolean;
+  lastMessageAt: string;
+  lastMessagePreview?: string;
+}
+
 export interface MessageDto {
   id: string;
   senderId: string;

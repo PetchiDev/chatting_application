@@ -15,7 +15,18 @@ export function VoiceRecorder({ onRecorded, disabled }: Props) {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : MediaRecorder.isTypeSupported('audio/mp4')
+            ? 'audio/mp4'
+            : '';
+
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      const blobType = mimeType || recorder.mimeType || 'audio/webm';
       chunks.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -23,7 +34,12 @@ export function VoiceRecorder({ onRecorded, disabled }: Props) {
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunks.current, { type: 'audio/webm' });
+        if (chunks.current.length === 0) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        const uploadType = blobType.split(';')[0] || 'audio/webm';
+        const blob = new Blob(chunks.current, { type: uploadType });
         onRecorded(blob);
         stream.getTracks().forEach((t) => t.stop());
       };

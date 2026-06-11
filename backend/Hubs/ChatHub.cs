@@ -44,8 +44,9 @@ public class ChatHub : Hub
 
         _presence.UserConnected(userId.Value, Context.ConnectionId);
         await Groups.AddToGroupAsync(Context.ConnectionId, "global");
-        await Clients.Others.SendAsync("UserJoined", new UserDto(user.Id, user.Username, user.ProfilePictureUrl, user.IsGuest, true));
-        await Clients.Caller.SendAsync("OnlineUsers", await GetOnlineUsersAsync());
+
+        var onlineUsers = await GetOnlineUsersAsync();
+        await Clients.All.SendAsync("OnlineUsers", onlineUsers);
         await base.OnConnectedAsync();
     }
 
@@ -54,9 +55,8 @@ public class ChatHub : Hub
         var userId = _presence.UserDisconnected(Context.ConnectionId);
         if (userId.HasValue)
         {
-            var user = await _db.GetUserByIdAsync(userId.Value);
-            if (user != null)
-                await Clients.Others.SendAsync("UserLeft", new UserDto(user.Id, user.Username, user.ProfilePictureUrl, user.IsGuest, false));
+            var onlineUsers = await GetOnlineUsersAsync();
+            await Clients.All.SendAsync("OnlineUsers", onlineUsers);
         }
         await base.OnDisconnectedAsync(exception);
     }

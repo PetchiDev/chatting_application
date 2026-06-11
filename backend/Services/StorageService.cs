@@ -24,7 +24,7 @@ public class StorageService
         var url = $"{_supabaseUrl}/storage/v1/object/{_bucket}/{fileName}";
 
         using var content = new StreamContent(file.OpenReadStream());
-        content.Headers.ContentType = new MediaTypeHeaderValue(file.ContentType);
+        content.Headers.ContentType = new MediaTypeHeaderValue(NormalizeContentType(file.ContentType));
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _serviceKey);
@@ -38,6 +38,13 @@ public class StorageService
         }
 
         return $"{_supabaseUrl}/storage/v1/object/public/{_bucket}/{fileName}";
+    }
+
+    private static string NormalizeContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType)) return "application/octet-stream";
+        var baseType = contentType.Split(';', 2)[0].Trim();
+        return string.IsNullOrWhiteSpace(baseType) ? "application/octet-stream" : baseType;
     }
 
     public async Task DeleteByUrlAsync(string publicUrl)

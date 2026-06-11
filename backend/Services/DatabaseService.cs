@@ -272,6 +272,57 @@ public class DatabaseService
         return ids;
     }
 
+    public async Task<List<(Guid UserId, string Username, string? ProfilePictureUrl, bool IsGuest, DateTime LastMessageAt, string? Content, string MessageType)>> GetRecentDirectChatsAsync(Guid userId, int limit = 20)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            @"SELECT other_user_id, username, profile_picture_url, is_guest, created_at, content, message_type
+              FROM (
+                SELECT
+                  CASE WHEN m.sender_id = @userId THEN m.recipient_id ELSE m.sender_id END AS other_user_id,
+                  u.username,
+                  u.profile_picture_url,
+                  u.is_guest,
+                  m.created_at,
+                  m.content,
+                  m.message_type,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY CASE WHEN m.sender_id = @userId THEN m.recipient_id ELSE m.sender_id END
+                    ORDER BY m.created_at DESC
+                  ) AS rn
+                FROM messages m
+                JOIN users u ON u.id = CASE WHEN m.sender_id = @userId THEN m.recipient_id ELSE m.sender_id END
+                WHERE m.recipient_id IS NOT NULL
+                  AND (m.sender_id = @userId OR m.recipient_id = @userId)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_hidden_messages h
+                    WHERE h.message_id = m.id AND h.user_id = @userId
+                  )
+              ) recent
+              WHERE rn = 1
+              ORDER BY created_at DESC
+              LIMIT @limit", conn);
+        cmd.Parameters.AddWithValue("userId", userId);
+        cmd.Parameters.AddWithValue("limit", limit);
+
+        var results = new List<(Guid, string, string?, bool, DateTime, string?, string)>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            results.Add((
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetBoolean(3),
+                reader.GetDateTime(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.GetString(6)
+            ));
+        }
+        return results;
+    }
+
     public async Task<List<User>> GetAllUsersAsync()
     {
         await using var conn = CreateConnection();

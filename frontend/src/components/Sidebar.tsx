@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useChatStore } from '../store/chatStore';
 import { useAuthStore } from '../store/authStore';
-import type { UserDto } from '../types';
+import type { RecentChatDto, UserDto } from '../types';
 
 function LogoutIcon() {
   return (
@@ -14,6 +14,16 @@ function LogoutIcon() {
   );
 }
 
+function formatTime(iso: string) {
+  const date = new Date(iso);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -22,11 +32,70 @@ interface Props {
   onLogout: () => void;
 }
 
+function UserListItem({
+  user,
+  active,
+  subtitle,
+  onClick,
+}: {
+  user: UserDto;
+  active: boolean;
+  subtitle?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className={`user-item ${active ? 'active' : ''}`} onClick={onClick}>
+      <div className="user-item-accent" />
+      <div className={`user-avatar ${user.isOnline ? 'online' : ''}`}>
+        {user.profilePictureUrl ? (
+          <img src={user.profilePictureUrl} alt="" />
+        ) : (
+          user.username[0]?.toUpperCase()
+        )}
+      </div>
+      <div className="user-info">
+        <span className="user-name">
+          {user.username}
+          {user.isGuest && <span className="guest-badge">Guest</span>}
+        </span>
+        <span className={`user-status ${user.isOnline ? 'is-online' : ''}`}>
+          {subtitle ?? (user.isOnline ? '● Online now' : 'Offline')}
+        </span>
+      </div>
+      <span className="user-chevron">›</span>
+    </button>
+  );
+}
+
 export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }: Props) {
   const users = useChatStore((s) => s.users);
+  const recentChats = useChatStore((s) => s.recentChats);
   const selectedUser = useChatStore((s) => s.selectedUser);
   const currentUser = useAuthStore((s) => s.user);
   const listRef = useRef<HTMLDivElement>(null);
+  const [search, setSearch] = useState('');
+
+  const onlineUsers = useMemo(
+    () => users.filter((u) => u.isOnline),
+    [users]
+  );
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return users.filter((u) => u.username.toLowerCase().includes(q));
+  }, [search, users]);
+
+  const resolveUser = (chat: RecentChatDto): UserDto => {
+    const live = users.find((u) => u.id === chat.userId);
+    return {
+      id: chat.userId,
+      username: live?.username ?? chat.username,
+      profilePictureUrl: live?.profilePictureUrl ?? chat.profilePictureUrl,
+      isGuest: live?.isGuest ?? chat.isGuest,
+      isOnline: live?.isOnline ?? chat.isOnline,
+    };
+  };
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -35,9 +104,7 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
       { opacity: 0, x: -16 },
       { opacity: 1, x: 0, duration: 0.35, stagger: 0.04, ease: 'power2.out' }
     );
-  }, [users.length]);
-
-  const onlineUsers = users.filter((u) => u.isOnline);
+  }, [onlineUsers.length, recentChats.length, searchResults.length]);
 
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`}>
@@ -56,74 +123,129 @@ export function Sidebar({ open, onClose, onSelectUser, onOpenProfile, onLogout }
           </div>
           <div className="stat-pill muted">{users.length} contacts</div>
         </div>
-      </div>
 
-      <div className="sidebar-section">
-        <p className="section-label">
-          <span className="section-icon">💬</span>
-          Conversations
-        </p>
-
-        <button
-          type="button"
-          className={`user-item featured ${!selectedUser ? 'active' : ''}`}
-          onClick={() => onSelectUser(null)}
-        >
-          <div className="user-item-accent" />
-          <div className="user-avatar global">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="2" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </div>
-          <div className="user-info">
-            <span className="user-name">Group Chat</span>
-            <span className="user-status">Everyone · Public room</span>
-          </div>
-          <span className="user-chevron">›</span>
-        </button>
-      </div>
-
-      <div className="sidebar-section flex-grow">
-        <p className="section-label">
-          <span className="section-icon">👥</span>
-          Active Users
-        </p>
-
-        <div className="user-list" ref={listRef}>
-          {users.length === 0 && (
-            <p className="sidebar-empty">No other users yet</p>
-          )}
-          {users.map((user) => (
+        <div className="sidebar-search">
+          <svg className="sidebar-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+            <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            className="sidebar-search-input"
+            placeholder="Search users..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search users"
+          />
+          {search && (
             <button
-              key={user.id}
               type="button"
-              className={`user-item ${selectedUser?.id === user.id ? 'active' : ''}`}
-              onClick={() => onSelectUser(user)}
+              className="sidebar-search-clear"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {search.trim() && (
+        <div className="sidebar-section">
+          <p className="section-label">
+            <span className="section-icon">🔍</span>
+            Search Results
+          </p>
+          <div className="user-list compact">
+            {searchResults.length === 0 && (
+              <p className="sidebar-empty">No users found</p>
+            )}
+            {searchResults.map((user) => (
+              <UserListItem
+                key={user.id}
+                user={user}
+                active={selectedUser?.id === user.id}
+                onClick={() => {
+                  onSelectUser(user);
+                  setSearch('');
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!search.trim() && (
+        <>
+          <div className="sidebar-section">
+            <p className="section-label">
+              <span className="section-icon">💬</span>
+              Conversations
+            </p>
+
+            <button
+              type="button"
+              className={`user-item featured ${!selectedUser ? 'active' : ''}`}
+              onClick={() => onSelectUser(null)}
             >
               <div className="user-item-accent" />
-              <div className={`user-avatar ${user.isOnline ? 'online' : ''}`}>
-                {user.profilePictureUrl ? (
-                  <img src={user.profilePictureUrl} alt="" />
-                ) : (
-                  user.username[0]?.toUpperCase()
-                )}
+              <div className="user-avatar global">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="2" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
               </div>
               <div className="user-info">
-                <span className="user-name">
-                  {user.username}
-                  {user.isGuest && <span className="guest-badge">Guest</span>}
-                </span>
-                <span className={`user-status ${user.isOnline ? 'is-online' : ''}`}>
-                  {user.isOnline ? '● Online now' : 'Offline'}
-                </span>
+                <span className="user-name">Group Chat</span>
+                <span className="user-status">Everyone · Public room</span>
               </div>
               <span className="user-chevron">›</span>
             </button>
-          ))}
-        </div>
-      </div>
+
+            {recentChats.length > 0 && (
+              <>
+                <p className="section-sublabel">Recent</p>
+                <div className="user-list compact">
+                  {recentChats.map((chat) => {
+                    const user = resolveUser(chat);
+                    return (
+                      <UserListItem
+                        key={chat.userId}
+                        user={user}
+                        active={selectedUser?.id === chat.userId}
+                        subtitle={chat.lastMessagePreview || formatTime(chat.lastMessageAt)}
+                        onClick={() => onSelectUser(user)}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="sidebar-section flex-grow">
+            <p className="section-label">
+              <span className="section-icon">👥</span>
+              Active Users
+            </p>
+
+            <div className="user-list" ref={listRef}>
+              {onlineUsers.length === 0 && (
+                <p className="sidebar-empty">No users online right now</p>
+              )}
+              {onlineUsers.map((user) => (
+                <UserListItem
+                  key={user.id}
+                  user={user}
+                  active={selectedUser?.id === user.id}
+                  onClick={() => onSelectUser(user)}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="sidebar-footer">
         <button type="button" className="profile-card" onClick={onOpenProfile}>

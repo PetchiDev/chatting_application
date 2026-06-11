@@ -16,15 +16,28 @@ export function useSignalR() {
   useEffect(() => {
     if (!user?.token) return;
 
+    let cancelled = false;
+
     const {
       addGroupMessage,
       addDirectMessage,
       setUsers,
+      setRecentChats,
+      bumpRecentChat,
       setTyping,
       clearAll,
       updateUser,
       removeMessage,
     } = useChatStore.getState();
+
+    const applyOnlineUsers = (users: UserDto[]) => {
+      setUsers(users.filter((u) => u.id !== user.userId));
+    };
+
+    const syncOnlineUsers = async (conn: signalR.HubConnection) => {
+      if (conn.state !== signalR.HubConnectionState.Connected) return;
+      await conn.invoke('RequestOnlineUsers');
+    };
 
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(`${HUB_URL}?access_token=${user.token}`)
@@ -41,26 +54,10 @@ export function useSignalR() {
           ? msg.recipientId!
           : msg.senderId;
       addDirectMessage(otherId, msg);
+      bumpRecentChat(msg, user.userId);
     });
 
-    connection.on('OnlineUsers', (users: UserDto[]) =>
-      setUsers(users.filter((u) => u.id !== user.userId))
-    );
-
-    connection.on('UserJoined', (u: UserDto) => {
-      const current = useChatStore.getState().users;
-      const exists = current.find((x) => x.id === u.id);
-      if (exists) {
-        setUsers(current.map((x) => (x.id === u.id ? { ...x, isOnline: true } : x)));
-      } else {
-        setUsers([...current, u]);
-      }
-    });
-
-    connection.on('UserLeft', (u: UserDto) => {
-      const current = useChatStore.getState().users;
-      setUsers(current.map((x) => (x.id === u.id ? { ...x, isOnline: false } : x)));
-    });
+    connection.on('OnlineUsers', applyOnlineUsers);
 
     connection.on('UserTyping', (username: string, isTyping: boolean) => {
       setTyping(username, isTyping);
@@ -74,25 +71,40 @@ export function useSignalR() {
       removeMessage(payload.messageId);
     });
 
-    connection
-      .start()
-      .then(async () => {
-        const [groupMsgs, users] = await Promise.all([
-          api.getGroupMessages(user.token),
-          api.getUsers(user.token),
-        ]);
-        useChatStore.getState().setGroupMessages(groupMsgs);
-        setUsers(users);
-      })
-      .catch(console.error);
+    connection.onreconnected(async () => {
+      await syncOnlineUsers(connection);
+    });
 
-    connectionRef.current = connection;
+    (async () => {
+      try {
+        await connection.start();
+        if (cancelled) return;
+
+        connectionRef.current = connection;
+
+        // Presence sync first — hub is the source of truth for online status
+        await syncOnlineUsers(connection);
+        if (cancelled) return;
+
+        const [groupMsgs, recentChats] = await Promise.all([
+          api.getGroupMessages(user.token),
+          api.getRecentChats(user.token),
+        ]);
+        if (cancelled) return;
+
+        useChatStore.getState().setGroupMessages(groupMsgs);
+        setRecentChats(recentChats);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
 
     return () => {
+      cancelled = true;
       connection.stop();
       connectionRef.current = null;
     };
-  }, [user?.token]);
+  }, [user?.token, user?.userId]);
 
   const sendMessage = async (
     content: string | undefined,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import type { MessageDto } from '../types';
 import { LinkPreview } from './LinkPreview';
+import { AudioMessage } from './AudioMessage';
 
 interface Props {
   message: MessageDto;
@@ -35,6 +36,14 @@ export function MessageBubble({ message, isOwn, onDelete }: Props) {
   }, [menuOpen]);
 
   const hasLinkPreview = Boolean(message.linkUrl);
+  const messageType = message.messageType?.toLowerCase();
+  const isAudio =
+    messageType === 'audio' ||
+    Boolean(
+      message.attachmentUrl &&
+        (message.attachmentName?.startsWith('voice-') ||
+          /\.(webm|mp3|ogg|wav|m4a|aac)(\?|$)/i.test(message.attachmentUrl))
+    );
 
   const handleDelete = (forEveryone: boolean) => {
     setMenuOpen(false);
@@ -42,18 +51,16 @@ export function MessageBubble({ message, isOwn, onDelete }: Props) {
   };
 
   const renderContent = () => {
-    switch (message.messageType) {
+    if (isAudio && message.attachmentUrl) {
+      return <AudioMessage src={message.attachmentUrl} isOwn={isOwn} />;
+    }
+
+    switch (messageType) {
       case 'image':
         return (
           <a href={message.attachmentUrl} target="_blank" rel="noreferrer">
             <img src={message.attachmentUrl} alt={message.attachmentName || 'image'} className="msg-image" />
           </a>
-        );
-      case 'audio':
-        return (
-          <audio controls src={message.attachmentUrl} className="msg-audio">
-            <track kind="captions" />
-          </audio>
         );
       case 'file':
         return (
@@ -93,7 +100,7 @@ export function MessageBubble({ message, isOwn, onDelete }: Props) {
       <div className="msg-body">
         {!isOwn && <span className="msg-sender">{message.senderUsername}</span>}
         <div className="msg-content-wrap">
-          <div className={`msg-content ${hasLinkPreview ? 'has-link' : ''}`}>{renderContent()}</div>
+          <div className={`msg-content ${hasLinkPreview ? 'has-link' : ''} ${isAudio ? 'has-audio' : ''}`}>{renderContent()}</div>
           <div className={`msg-actions ${menuOpen ? 'open' : ''}`} ref={menuRef}>
             <button
               type="button"

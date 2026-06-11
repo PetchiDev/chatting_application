@@ -102,12 +102,17 @@ export function ChatWindow({ sendMessage, sendTyping, deleteMessage, onOpenSideb
   };
 
   const handleVoice = async (blob: Blob) => {
-    if (!user?.token) return;
+    if (!user?.token || blob.size === 0) return;
     setUploading(true);
     try {
-      const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+      const mime = (blob.type || 'audio/webm').split(';')[0];
+      const ext = mime.includes('mp4') ? 'm4a' : 'webm';
+      const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
       const { url, name } = await api.uploadFile(user.token, file);
       await sendMessage(undefined, 'audio', selectedUser?.id, url, name);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to send voice message');
     } finally {
       setUploading(false);
     }
