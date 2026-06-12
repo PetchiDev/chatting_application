@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import * as api from '../lib/api';
 import type { AiChatMessage, AiClientAction, A2uiAction } from '../types/ai';
 import { A2UIRenderer } from './A2UIRenderer';
+import { AiMarkdown } from './AiMarkdown';
 
 function RobotAvatar({ small }: { small?: boolean }) {
   return (
@@ -34,7 +35,7 @@ export function AiChatBot({ open, onClose, onAction, onA2uiAction }: Props) {
   const [messages, setMessages] = useState<AiChatMessage[]>([
     {
       role: 'assistant',
-      content: 'Vanakkam! I\'m your Kryptos AI Assistant. You can chat with me normally — Tamil or English — or ask me to find users, create groups, open chats, and more.',
+      content: 'Vanakkam! I\'m your Kryptos AI Assistant — ask me anything like ChatGPT (companies, general knowledge, Tamil/English) or tell me to send messages, create groups, find users, and more.',
     },
   ]);
   const [input, setInput] = useState('');
@@ -143,7 +144,11 @@ export function AiChatBot({ open, onClose, onAction, onA2uiAction }: Props) {
                 <div key={i} className={`ai-chat-bubble-wrap ${msg.role}`}>
                   {msg.role === 'assistant' && <RobotAvatar small />}
                   <div className={`ai-chat-bubble ${msg.role}`}>
-                    <p>{msg.content}</p>
+                    {msg.role === 'assistant' ? (
+                      <AiMarkdown content={msg.content} />
+                    ) : (
+                      <p className="ai-chat-plain">{msg.content}</p>
+                    )}
                     {msg.a2ui && (
                       <A2UIRenderer surface={msg.a2ui} onAction={onA2uiAction} />
                     )}

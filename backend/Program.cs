@@ -53,6 +53,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<StorageService>();
 builder.Services.AddScoped<LinkPreviewService>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<WebSearchService>();
 builder.Services.AddScoped<MessageSendService>();
 builder.Services.AddScoped<AiToolService>();
 builder.Services.AddScoped<GroqAiService>();
@@ -137,4 +138,5 @@ app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<CallHub>("/hubs/call");
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
-app.Run();
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+app.Run($"http://0.0.0.0:{port}");

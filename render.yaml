@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: kryptos-chat-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: singapore
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__Supabase
+        sync: false
+      - key: Jwt__Secret
+        sync: false
+      - key: Jwt__Issuer
+        value: EphemeralChat
+      - key: Jwt__Audience
+        value: EphemeralChatUsers
+      - key: Jwt__ExpiryHours
+        value: "24"
+      - key: Supabase__Url
+        sync: false
+      - key: Supabase__ServiceRoleKey
+        sync: false
+      - key: Supabase__StorageBucket
+        value: chat-attachments
+      - key: Cors__Origins__0
+        value: http://localhost:5173
+      - key: Cors__Origins__1
+        sync: false
+      - key: Groq__ApiKey
+        sync: false

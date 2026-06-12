@@ -14,7 +14,8 @@ public class GroqAiService
     private readonly AiToolService _tools;
     private readonly ILogger<GroqAiService> _logger;
 
-    private const string Model = "llama-3.3-70b-versatile";
+    private const string ToolsModel = "llama-3.3-70b-versatile";
+    private const string ResearchModel = "groq/compound-mini";
     private const int MaxToolRounds = 8;
 
     public GroqAiService(
@@ -42,23 +43,78 @@ public class GroqAiService
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-        var messages = new JsonArray
+        if (ShouldUseWebResearch(history))
         {
-            new JsonObject
+            try
             {
-                ["role"] = "system",
-                ["content"] = BuildSystemPrompt(username)
+                return await ChatWithCompoundAsync(client, username, history, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Compound research failed, falling back to tools + web_search");
+            }
+        }
+
+        return await ChatWithToolsAsync(client, userId, username, history, ct);
+    }
+
+    private async Task<AiChatResponse> ChatWithCompoundAsync(
+        HttpClient client,
+        string username,
+        List<AiChatMessage> history,
+        CancellationToken ct)
+    {
+        var messages = BuildMessageArray(BuildResearchSystemPrompt(username), history);
+
+        var body = new JsonObject
+        {
+            ["model"] = ResearchModel,
+            ["messages"] = messages.DeepClone(),
+            ["temperature"] = 0.6,
+            ["max_tokens"] = 4096,
+            ["compound_custom"] = new JsonObject
+            {
+                ["tools"] = new JsonObject
+                {
+                    ["enabled_tools"] = new JsonArray { "web_search", "visit_website" }
+                }
             }
         };
 
-        foreach (var msg in history.TakeLast(20))
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions")
         {
-            messages.Add(new JsonObject
-            {
-                ["role"] = msg.Role,
-                ["content"] = msg.Content
-            });
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
+        };
+
+        using var response = await client.SendAsync(request, ct);
+        var responseText = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError("Groq Compound error {Status}: {Body}", response.StatusCode, responseText);
+            var detail = TryExtractGroqError(responseText);
+            throw new InvalidOperationException(detail ?? "Web research temporarily unavailable.");
         }
+
+        using var doc = JsonDocument.Parse(responseText);
+        var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message")
+            .TryGetProperty("content", out var c) ? c.GetString() ?? "" : "";
+
+        var (reply, a2ui) = ParseReply(content);
+        if (string.IsNullOrWhiteSpace(reply))
+            reply = "I couldn't find enough information. Try asking with a more specific name or topic.";
+
+        return new AiChatResponse(reply, [], a2ui);
+    }
+
+    private async Task<AiChatResponse> ChatWithToolsAsync(
+        HttpClient client,
+        Guid userId,
+        string username,
+        List<AiChatMessage> history,
+        CancellationToken ct)
+    {
+        var messages = BuildMessageArray(BuildSystemPrompt(username), history);
 
         var allActions = new List<AiClientAction>();
         JsonElement? a2ui = null;
@@ -67,7 +123,7 @@ public class GroqAiService
         {
             var body = new JsonObject
             {
-                ["model"] = Model,
+                ["model"] = ToolsModel,
                 ["messages"] = messages.DeepClone(),
                 ["tools"] = BuildTools(),
                 ["tool_choice"] = "auto",
@@ -136,6 +192,94 @@ public class GroqAiService
             a2ui);
     }
 
+    private static JsonArray BuildMessageArray(string systemPrompt, List<AiChatMessage> history)
+    {
+        var messages = new JsonArray
+        {
+            new JsonObject
+            {
+                ["role"] = "system",
+                ["content"] = systemPrompt
+            }
+        };
+
+        foreach (var msg in history.TakeLast(20))
+        {
+            messages.Add(new JsonObject
+            {
+                ["role"] = msg.Role,
+                ["content"] = msg.Content
+            });
+        }
+
+        return messages;
+    }
+
+    private static bool ShouldUseWebResearch(List<AiChatMessage> history)
+    {
+        var lastUser = history.LastOrDefault(m => m.Role == "user")?.Content?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(lastUser)) return false;
+        if (HasAppActionIntent(lastUser)) return false;
+        if (HasResearchIntent(lastUser)) return true;
+
+        if (IsResearchFollowUp(lastUser))
+        {
+            return history.TakeLast(8).Any(m =>
+                m.Role == "user" && HasResearchIntent(m.Content));
+        }
+
+        return false;
+    }
+
+    private static bool HasAppActionIntent(string text)
+    {
+        var lower = text.ToLowerInvariant();
+        string[] keywords =
+        [
+            "send message", "send a message", "send hi", "message to", "create group", "new group",
+            "open chat", "open dm", "mute", "unmute", "remove member", "add member", "leave group",
+            "list my groups", "my notifications", "find user", "search user", "who is online"
+        ];
+        return keywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasResearchIntent(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var lower = text.ToLowerInvariant();
+        string[] patterns =
+        [
+            "tell me about", "what is", "what are", "who is", "who are", "explain", "describe",
+            "company", "technologies", "technology", "located", "location", "headquarter",
+            "history of", "compare", "difference between", "latest news", "news about",
+            "research", "explore", "find out about", "learn about", "overview of",
+            "kryptos tech", "kryptos info"
+        ];
+        return patterns.Any(p => lower.Contains(p, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsResearchFollowUp(string text)
+    {
+        var lower = text.ToLowerInvariant().Trim();
+        return lower is "yes" or "yeah" or "yep" or "sure" or "ok" or "okay" or "tell me more"
+            or "continue" or "go on" or "please" or "yes please";
+    }
+
+    private static string BuildResearchSystemPrompt(string username) =>
+        $"""
+        You are Kryptos AI — a ChatGPT-style research assistant built into the Kryptos Info Sys chat app.
+        The user "{username}" is asking you to explore and explain topics using live web search.
+
+        Instructions:
+        - Search the web and give clear, well-structured answers like ChatGPT (intro, key points, summary).
+        - For companies (e.g. Kryptos Technologies, Microsoft, Tesla): cover what they do, industry, location if known, and notable facts.
+        - Use the user's language (English, Tamil, or Tanglish). If they write in Tamil, reply in Tamil.
+        - Be informative but concise. Use bullet points for lists.
+        - If search results are limited, say so honestly and share what you found.
+        - Do NOT list internal chat app features unless the user asks about the chat app itself.
+        - Mention sources briefly when helpful.
+        """;
+
     private static List<AiClientAction> DeduplicateActions(List<AiClientAction> actions)
     {
         var seen = new HashSet<string>();
@@ -187,38 +331,30 @@ public class GroqAiService
 
     private static string BuildSystemPrompt(string username) =>
         $"""
-        You are Kryptos AI — a friendly, interactive assistant inside the Kryptos Info Sys team chat app.
+        You are Kryptos AI — a friendly, all-in-one assistant inside the Kryptos Info Sys team chat app.
         The logged-in user is "{username}".
+        You work like ChatGPT for general questions AND can control this chat app.
+
+        ## ChatGPT mode (general knowledge & research)
+        - Answer general questions, explain concepts, help with writing, ideas, coding tips, etc.
+        - For companies, products, people, news, locations: call web_search first, then summarize clearly
+        - Example: "tell me about Kryptos Technologies" → web_search then structured answer
+        - Never dump raw search results — write a natural, helpful reply
 
         ## How to chat
         - Be warm, natural, and conversational — like a helpful colleague, not a robot.
         - ALWAYS reply in the same language the user uses (English, Tamil, or Tanglish mix).
-        - For greetings (hi, hello, vanakkam), small talk, jokes, Tamil/English questions, or general knowledge: answer directly yourself. Do NOT call any tools.
-        - Example: "do you know tamil?" → reply warmly in Tamil and English that you can chat in Tamil.
-        - Example: "hi" → greet them by name and ask how you can help today.
+        - For greetings (hi, hello, vanakkam): greet warmly. Do NOT call tools for simple hi/hello.
 
-        ## When to use tools (app actions only)
-        Use tools ONLY when the user wants something done in THIS chat app or asks about live data here:
+        ## Chat app actions (use tools)
         - Find users, groups, recent chats, notifications
-        - Create a group, add/remove members, open a DM/group/global chat, mute notifications
-        - For app data: use tools first, then explain results in plain friendly language
-        - NEVER paste raw JSON, error codes, or tool output verbatim to the user
-        - Never invent usernames — search_users before naming people
-
-        ## Company context
-        - App: Kryptos Info Sys internal chat (DMs, groups, global room, calls, files, voice notes)
-        - If asked about Kryptos office location/contact and you are not sure: say you do not have verified address data in the app, suggest admin or company website — do not fabricate addresses.
-
-        ## Actions
-        - create_group → use tool with name + member_usernames
-        - open chat only → open_user_chat / open_group_chat / open_global_chat
-        - SEND a message → send_direct_message / send_group_message / send_global_message with exact content text
-        - If user says "send hi to Kishore" or "message Kishore saying ..." → call send_direct_message (NOT just open_user_chat)
-        - After sending, confirm naturally: "Sent your message to Kishore!"
+        - Create groups, add/remove members, open chats, mute notifications
+        - SEND messages: send_direct_message / send_group_message / send_global_message
+        - If user says "send hi to Kishore" → send_direct_message (NOT just open_user_chat)
+        - Never invent usernames — search_users first
 
         ## A2UI (optional)
-        Only when offering clickable choices (user pick list). Append a fenced ```a2ui JSON block.
-        Types: Column, Text, Button, List, Card. Actions: open_user, open_group, create_group_confirm.
+        Only for clickable user/group pick lists. Append fenced ```a2ui JSON block.
         """;
 
     private static JsonArray BuildTools()
@@ -257,6 +393,7 @@ public class GroqAiService
         ("remove_group_member", "Remove a member from a group (admin only)", """{"type":"object","properties":{"group_id":{"type":"string"},"group_name":{"type":"string"},"user_id":{"type":"string"},"username":{"type":"string"}}}"""),
         ("mute_conversation", "Mute or unmute notifications", """{"type":"object","properties":{"channel_type":{"type":"string","description":"global, dm, or group"},"channel_id":{"type":"string"},"username":{"type":"string"},"group_name":{"type":"string"},"muted":{"type":"boolean"}},"required":["channel_type"]}"""),
         ("get_notifications", "Get recent notifications and unread count", """{"type":"object","properties":{}}"""),
-        ("get_current_context", "Get info about the app and current user", """{"type":"object","properties":{}}""")
+        ("get_current_context", "Get info about the app and current user", """{"type":"object","properties":{}}"""),
+        ("web_search", "Search the web for information about companies, people, products, news, or any general topic", """{"type":"object","properties":{"query":{"type":"string","description":"Search query e.g. Kryptos Technologies company"}},"required":["query"]}""")
     ];
 }

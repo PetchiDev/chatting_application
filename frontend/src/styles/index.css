@@ -3149,17 +3149,172 @@ body {
 }
 
 .ai-chat-bubble {
-  max-width: 85%;
+  max-width: 92%;
   padding: 0.65rem 0.85rem;
   border-radius: 16px;
   font-size: 0.88rem;
   line-height: 1.45;
 }
 
+.ai-chat-bubble.assistant {
+  max-width: min(96%, 520px);
+  padding: 0.85rem 1rem;
+}
+
+.ai-chat-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .ai-chat-bubble p {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* AI markdown rich text */
+.ai-markdown {
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.ai-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.ai-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.ai-markdown h1,
+.ai-markdown h2,
+.ai-markdown h3,
+.ai-markdown h4 {
+  margin: 0.85rem 0 0.45rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.ai-markdown h1 { font-size: 1.05rem; }
+.ai-markdown h2 { font-size: 0.98rem; color: var(--brand-blue); }
+.ai-markdown h3 { font-size: 0.92rem; color: #1e4d8c; }
+.ai-markdown h4 { font-size: 0.88rem; }
+
+.ai-markdown p {
+  margin: 0.45rem 0;
+  white-space: normal;
+}
+
+.ai-markdown strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ai-markdown em {
+  font-style: italic;
+}
+
+.ai-markdown ul,
+.ai-markdown ol {
+  margin: 0.4rem 0 0.55rem;
+  padding-left: 1.25rem;
+}
+
+.ai-markdown li {
+  margin: 0.25rem 0;
+}
+
+.ai-markdown li::marker {
+  color: var(--brand-blue);
+}
+
+.ai-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.65rem 0;
+}
+
+.ai-markdown blockquote {
+  margin: 0.5rem 0;
+  padding: 0.45rem 0.75rem;
+  border-left: 3px solid var(--brand-blue);
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-muted);
+}
+
+.ai-markdown code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.8em;
+  background: var(--surface-2);
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+}
+
+.ai-markdown pre {
+  margin: 0.5rem 0;
+  padding: 0.65rem 0.75rem;
+  background: #1e293b;
+  color: #e2e8f0;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.78rem;
+}
+
+.ai-markdown pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.ai-markdown a {
+  color: var(--brand-blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ai-markdown a:hover {
+  text-decoration: underline;
+}
+
+.ai-markdown-table-wrap {
+  overflow-x: auto;
+  margin: 0.55rem 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.ai-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.ai-markdown th,
+.ai-markdown td {
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.ai-markdown th {
+  background: linear-gradient(135deg, rgba(30, 77, 140, 0.08), rgba(59, 130, 246, 0.06));
+  font-weight: 700;
+  color: var(--brand-blue);
+  white-space: nowrap;
+}
+
+.ai-markdown tr:last-child td {
+  border-bottom: none;
+}
+
+.ai-markdown tr:nth-child(even) td {
+  background: rgba(248, 250, 252, 0.8);
 }
 
 .ai-chat-bubble.assistant {

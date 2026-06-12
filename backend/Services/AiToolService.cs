@@ -11,17 +11,20 @@ public class AiToolService
     private readonly DatabaseService _db;
     private readonly PresenceService _presence;
     private readonly MessageSendService _messages;
+    private readonly WebSearchService _webSearch;
     private readonly IHubContext<ChatHub> _hub;
 
     public AiToolService(
         DatabaseService db,
         PresenceService presence,
         MessageSendService messages,
+        WebSearchService webSearch,
         IHubContext<ChatHub> hub)
     {
         _db = db;
         _presence = presence;
         _messages = messages;
+        _webSearch = webSearch;
         _hub = hub;
     }
 
@@ -78,9 +81,12 @@ public class AiToolService
                         "Custom groups with admin controls",
                         "Voice messages, file attachments, calls",
                         "Mute notifications per chat",
-                        "Forward and delete messages"
+                        "Forward and delete messages",
+                        "Web research about companies and general topics"
                     }
                 }), actions);
+            case "web_search":
+                return await WebSearchAsync(args);
             default:
                 return ($"{{\"error\":\"Unknown tool: {toolName}\"}}", actions);
         }
@@ -188,6 +194,16 @@ public class AiToolService
         }
 
         return null;
+    }
+
+    private async Task<(string, List<AiClientAction>)> WebSearchAsync(JsonElement args)
+    {
+        var query = args.TryGetProperty("query", out var q) ? q.GetString()?.Trim() : null;
+        if (string.IsNullOrWhiteSpace(query))
+            return ("{\"error\":\"Search query is required\"}", []);
+
+        var results = await _webSearch.SearchAsync(query);
+        return (JsonSerializer.Serialize(new { query, results }), []);
     }
 
     private async Task<List<object>> SearchUsersAsync(JsonElement args)
