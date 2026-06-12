@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import type { NotificationDto } from '../types';
@@ -8,14 +8,28 @@ interface Props {
   onNavigate: (n: NotificationDto) => void;
 }
 
+function DeleteIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function NotificationPanel({ onNavigate }: Props) {
   const user = useAuthStore((s) => s.user);
   const notifications = useChatStore((s) => s.notifications);
   const unreadCount = useChatStore((s) => s.unreadCount);
   const markRead = useChatStore((s) => s.markNotificationsRead);
+  const removeNotification = useChatStore((s) => s.removeNotification);
   const setNotifications = useChatStore((s) => s.setNotifications);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const visibleNotifications = useMemo(
+    () => notifications.filter((n) => !n.isRead),
+    [notifications]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +66,14 @@ export function NotificationPanel({ onNavigate }: Props) {
     markRead();
   };
 
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (user?.token) {
+      await api.deleteNotification(user.token, id).catch(() => {});
+    }
+    removeNotification(id);
+  };
+
   return (
     <div className="notification-wrap" ref={panelRef}>
       <button
@@ -72,29 +94,38 @@ export function NotificationPanel({ onNavigate }: Props) {
         <div className="notification-panel">
           <div className="notification-panel-header">
             <h3>Notifications</h3>
-            {unreadCount > 0 && (
+            {visibleNotifications.length > 0 && (
               <button type="button" className="link-btn" onClick={handleMarkAll}>
                 Mark all read
               </button>
             )}
           </div>
           <div className="notification-list">
-            {notifications.length === 0 && (
+            {visibleNotifications.length === 0 && (
               <p className="notification-empty">No notifications yet</p>
             )}
-            {notifications.map((n) => (
-              <button
-                key={n.id}
-                type="button"
-                className={`notification-item ${n.isRead ? '' : 'unread'}`}
-                onClick={() => handleClick(n)}
-              >
-                <span className="notif-title">{n.title}</span>
-                <span className="notif-body">{n.body}</span>
-                <span className="notif-time">
-                  {new Date(n.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </button>
+            {visibleNotifications.map((n) => (
+              <div key={n.id} className="notification-item-row">
+                <button
+                  type="button"
+                  className="notification-item unread"
+                  onClick={() => handleClick(n)}
+                >
+                  <span className="notif-title">{n.title}</span>
+                  <span className="notif-body">{n.body}</span>
+                  <span className="notif-time">
+                    {new Date(n.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="notification-delete-btn"
+                  onClick={(e) => handleDelete(e, n.id)}
+                  aria-label="Delete notification"
+                >
+                  <DeleteIcon />
+                </button>
+              </div>
             ))}
           </div>
         </div>

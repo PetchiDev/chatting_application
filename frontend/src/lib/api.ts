@@ -182,6 +182,14 @@ export async function markNotificationsRead(token: string, ids?: string[]) {
   await handleResponse(res);
 }
 
+export async function deleteNotification(token: string, id: string) {
+  const res = await fetch(`${API_URL}/api/notification/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  await handleResponse(res);
+}
+
 export async function subscribePush(
   token: string,
   subscription: { endpoint: string; keys: { p256dh: string; auth: string } }

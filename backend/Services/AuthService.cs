@@ -122,7 +122,9 @@ public class AuthService
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Secret"]!));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var expiryHours = int.Parse(_config["Jwt:ExpiryHours"] ?? "24");
+        var expiryHours = user.IsGuest
+            ? int.Parse(_config["Jwt:ExpiryHours"] ?? "24")
+            : int.Parse(_config["Jwt:RegisteredExpiryHours"] ?? "87600");
 
         var claims = new[]
         {

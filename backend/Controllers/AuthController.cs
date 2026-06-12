@@ -82,7 +82,7 @@ public class AuthController : ControllerBase
         var user = await _db.GetUserByIdAsync(userId.Value);
         if (user == null) return Unauthorized();
 
-        if (user.IsGuest && user.ExpiresAt < DateTime.UtcNow)
+        if (user.IsGuest && user.ExpiresAt.HasValue && user.ExpiresAt.Value < DateTime.UtcNow)
         {
             await _db.DeleteUserAsync(user.Id);
             return Unauthorized(new { error = "Guest session expired" });

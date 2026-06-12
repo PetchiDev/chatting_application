@@ -34,6 +34,7 @@ interface Props {
   onCreateGroup: () => void;
   onLeaveGroup: (groupId: string) => void;
   onOpenProfile: () => void;
+  onOpenContacts: () => void;
   onLogout: () => void;
 }
 
@@ -81,6 +82,7 @@ export function Sidebar({
   onCreateGroup,
   onLeaveGroup,
   onOpenProfile,
+  onOpenContacts,
   onLogout,
 }: Props) {
   const users = useChatStore((s) => s.users);
@@ -138,7 +140,9 @@ export function Sidebar({
             <span className="stat-dot pulse" />
             {onlineUsers.length} online
           </div>
-          <div className="stat-pill muted">{users.length} contacts</div>
+          <button type="button" className="stat-pill muted stat-pill-btn" onClick={onOpenContacts}>
+            {users.length} contacts
+          </button>
         </div>
 
         <div className="sidebar-search">

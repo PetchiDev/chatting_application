@@ -43,6 +43,16 @@ public class NotificationController : ControllerBase
         return Ok();
     }
 
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var userId = _auth.GetUserIdFromClaims(User);
+        if (userId == null) return Unauthorized();
+        var deleted = await _db.DeleteNotificationAsync(userId.Value, id);
+        if (!deleted) return NotFound();
+        return Ok();
+    }
+
     [HttpPost("push/subscribe")]
     public async Task<IActionResult> SubscribePush([FromBody] PushSubscribeRequest request)
     {

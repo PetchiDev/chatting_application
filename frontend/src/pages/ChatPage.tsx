@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { ChatWindow } from '../components/ChatWindow';
+import { ContactsPage } from '../components/ContactsPage';
 import { ProfileModal } from '../components/ProfileModal';
 import { CreateGroupModal } from '../components/CreateGroupModal';
 import { CallModal } from '../components/CallModal';
@@ -28,6 +29,7 @@ export function ChatPage() {
 
   const [showProfile, setShowProfile] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showContacts, setShowContacts] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { sendMessage, sendTyping, deleteMessage, forwardMessage } = useSignalR();
   const { activeCall, localStream, remoteStreams, startCall, acceptCall, hangUp } = useCall();
@@ -35,16 +37,19 @@ export function ChatPage() {
 
   const handleSelectUser = (u: UserDto) => {
     selectUser(u);
+    setShowContacts(false);
     setSidebarOpen(false);
   };
 
   const handleSelectGroup = (group: GroupDto) => {
     selectGroup(group);
+    setShowContacts(false);
     setSidebarOpen(false);
   };
 
   const handleSelectGlobal = () => {
     selectGlobal();
+    setShowContacts(false);
     setSidebarOpen(false);
   };
 
@@ -116,8 +121,18 @@ export function ChatPage() {
         onCreateGroup={() => { setShowCreateGroup(true); setSidebarOpen(false); }}
         onLeaveGroup={handleLeaveGroup}
         onOpenProfile={() => { setShowProfile(true); setSidebarOpen(false); }}
+        onOpenContacts={() => { setShowContacts(true); setSidebarOpen(false); }}
         onLogout={logout}
       />
+      {showContacts ? (
+        <ContactsPage
+          onBack={() => setShowContacts(false)}
+          onSelectUser={(u) => {
+            handleSelectUser(u);
+            setShowContacts(false);
+          }}
+        />
+      ) : (
       <ChatWindow
         sendMessage={sendMessage}
         sendTyping={sendTyping}
@@ -131,6 +146,7 @@ export function ChatPage() {
         onLogout={logout}
         onNotificationNavigate={handleNotificationNavigate}
       />
+      )}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
       {showCreateGroup && (
         <CreateGroupModal

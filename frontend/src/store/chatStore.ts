@@ -54,6 +54,8 @@ interface ChatState {
   setNotifications: (items: NotificationDto[], unread: number) => void;
   addNotification: (n: NotificationDto) => void;
   markNotificationsRead: (ids?: string[]) => void;
+  removeNotification: (id: string) => void;
+  clearAllNotifications: () => void;
   setTyping: (username: string, isTyping: boolean) => void;
   clearAll: () => void;
   updateUser: (user: UserDto) => void;
@@ -258,13 +260,27 @@ export const useChatStore = create<ChatState>((set) => ({
 
   markNotificationsRead: (ids) =>
     set((s) => {
-      const idSet = ids ? new Set(ids) : null;
-      const notifications = s.notifications.map((n) =>
-        !idSet || idSet.has(n.id) ? { ...n, isRead: true } : n
-      );
-      const unreadCount = notifications.filter((n) => !n.isRead).length;
-      return { notifications, unreadCount };
+      if (!ids) {
+        return { notifications: [], unreadCount: 0 };
+      }
+      const idSet = new Set(ids);
+      const notifications = s.notifications
+        .map((n) => (idSet.has(n.id) ? { ...n, isRead: true } : n))
+        .filter((n) => !n.isRead);
+      return { notifications, unreadCount: notifications.length };
     }),
+
+  removeNotification: (id) =>
+    set((s) => {
+      const removed = s.notifications.find((n) => n.id === id);
+      const notifications = s.notifications.filter((n) => n.id !== id);
+      return {
+        notifications,
+        unreadCount: removed && !removed.isRead ? Math.max(0, s.unreadCount - 1) : s.unreadCount,
+      };
+    }),
+
+  clearAllNotifications: () => set({ notifications: [], unreadCount: 0 }),
 
   setTyping: (username, isTyping) =>
     set((s) => ({

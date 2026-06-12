@@ -394,6 +394,17 @@ public partial class DatabaseService
         await cmd.ExecuteNonQueryAsync();
     }
 
+    public async Task<bool> DeleteNotificationAsync(Guid userId, Guid notificationId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "DELETE FROM notifications WHERE id = @id AND user_id = @uid", conn);
+        cmd.Parameters.AddWithValue("id", notificationId);
+        cmd.Parameters.AddWithValue("uid", userId);
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
     public async Task<int> GetUnreadNotificationCountAsync(Guid userId)
     {
         await using var conn = CreateConnection();
