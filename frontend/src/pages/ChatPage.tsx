@@ -29,7 +29,6 @@ export function ChatPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
   const { sendMessage, sendTyping, deleteMessage, forwardMessage } = useSignalR();
   const { activeCall, localStream, remoteStreams, startCall, acceptCall, hangUp } = useCall();
   usePushNotifications();
@@ -126,6 +125,9 @@ export function ChatPage() {
         forwardMessage={forwardMessage}
         onStartCall={handleStartCall}
         onOpenSidebar={() => setSidebarOpen(true)}
+        onSelectUserForAi={handleSelectUser}
+        onSelectGroupForAi={handleSelectGroup}
+        onSelectGlobalForAi={handleSelectGlobal}
         onLogout={logout}
         onNotificationNavigate={handleNotificationNavigate}
       />

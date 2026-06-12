@@ -8,6 +8,9 @@ import { VoiceRecorder } from './VoiceRecorder';
 import { NotificationPanel } from './NotificationPanel';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import { GroupMembersModal } from './GroupMembersModal';
+import { AiChatBot } from './AiChatBot';
+import { useAiActions } from '../hooks/useAiActions';
+import type { GroupDto, UserDto } from '../types';
 import type { MessageDto, NotificationDto, SendMessageOptions } from '../types';
 import * as api from '../lib/api';
 
@@ -62,6 +65,9 @@ interface Props {
   forwardMessage: (messageId: string, recipientId?: string, groupId?: string) => Promise<void>;
   onStartCall: (type: 'audio' | 'video') => void;
   onOpenSidebar: () => void;
+  onSelectUserForAi: (user: UserDto) => void;
+  onSelectGroupForAi: (group: GroupDto) => void;
+  onSelectGlobalForAi: () => void;
   onLogout: () => void;
   onNotificationNavigate: (n: NotificationDto) => void;
 }
@@ -73,6 +79,9 @@ export function ChatWindow({
   forwardMessage,
   onStartCall,
   onOpenSidebar,
+  onSelectUserForAi,
+  onSelectGroupForAi,
+  onSelectGlobalForAi,
   onLogout,
   onNotificationNavigate,
 }: Props) {
@@ -95,6 +104,13 @@ export function ChatWindow({
   const [uploading, setUploading] = useState(false);
   const [forwardMsg, setForwardMsg] = useState<MessageDto | null>(null);
   const [showGroupMembers, setShowGroupMembers] = useState(false);
+  const [showAi, setShowAi] = useState(false);
+
+  const { executeActions, executeA2uiAction } = useAiActions({
+    onSelectUser: onSelectUserForAi,
+    onSelectGroup: onSelectGroupForAi,
+    onSelectGlobal: onSelectGlobalForAi,
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const typingTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -294,6 +310,20 @@ export function ChatWindow({
           </div>
 
           <div className="chat-header-actions">
+            <button
+              type="button"
+              className="header-icon-btn ai-header-btn"
+              onClick={() => setShowAi(true)}
+              title="AI Assistant"
+              aria-label="Open AI Assistant"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7v1.73c.6.34 1 .99 1 1.73a2 2 0 1 1-4 0c0-.74.4-1.39 1-1.73V14a5 5 0 0 0-5-5h-1v1.27c.6.34 1 .99 1 1.73a2 2 0 1 1-4 0c0-.74.4-1.39 1-1.73V9a7 7 0 0 1 7-7h1V4.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                <circle cx="9" cy="13" r="1" fill="currentColor" />
+                <circle cx="15" cy="13" r="1" fill="currentColor" />
+                <path d="M10 17h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
             {canCall && (
               <>
                 <button type="button" className="header-icon-btn" onClick={() => onStartCall('audio')} title="Audio call" aria-label="Audio call">
@@ -403,6 +433,13 @@ export function ChatWindow({
       {showGroupMembers && selectedGroup && (
         <GroupMembersModal group={selectedGroup} onClose={() => setShowGroupMembers(false)} />
       )}
+
+      <AiChatBot
+        open={showAi}
+        onClose={() => setShowAi(false)}
+        onAction={executeActions}
+        onA2uiAction={executeA2uiAction}
+      />
     </main>
   );
 }

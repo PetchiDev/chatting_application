@@ -53,6 +53,9 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<StorageService>();
 builder.Services.AddScoped<LinkPreviewService>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<MessageSendService>();
+builder.Services.AddScoped<AiToolService>();
+builder.Services.AddScoped<GroqAiService>();
 builder.Services.AddHostedService<CleanupService>();
 
 var jwtSecret = builder.Configuration["Jwt:Secret"]!;

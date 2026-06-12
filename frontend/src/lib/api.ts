@@ -1,3 +1,4 @@
+import type { AiChatResponse } from '../types/ai';
 import type { AuthUser, GroupDto, GroupMemberDto, MessageDto, MuteEntryDto, NotificationDto, RecentChatDto, UserDto } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -236,6 +237,18 @@ export async function updateProfilePicture(token: string, file: File) {
     body: form,
   });
   return mapAuth(await handleResponse(res));
+}
+
+export async function sendAiChat(
+  token: string,
+  messages: { role: string; content: string }[]
+) {
+  const res = await fetch(`${API_URL}/api/ai/chat`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ messages }),
+  });
+  return handleResponse<AiChatResponse>(res);
 }
 
 export async function uploadFile(token: string, file: File) {
