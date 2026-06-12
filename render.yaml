@@ -29,6 +29,6 @@ services:
       - key: Cors__Origins__0
         value: http://localhost:5173
       - key: Cors__Origins__1
-        sync: false
+        value: https://frontend-happy-days.vercel.app
       - key: Groq__ApiKey
         sync: false
